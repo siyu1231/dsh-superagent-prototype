@@ -14,7 +14,9 @@ import { CheckSetupButton, Hint, LabelValue, LoadState, SetupMessage, StatusHead
 function SourceCard({ source }: { source: SourceView }) {
   const { t, call } = usePanel()
   const { running } = usePanelData()
-  const { reload } = useSettings()
+  const { reload, settings } = useSettings()
+  // Repositories come from the Workspaces; the card names them so the field above does not read as the only source.
+  const watched = settings.blocks.workspaces.value.filter(row => row.enabled && row.repository).map(row => row.repository)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const refreshLabels = async () => { const { added } = await call('POST sources/:id/labels',
     { id: source.id }); await reload(); return added }
@@ -52,6 +54,12 @@ function SourceCard({ source }: { source: SourceView }) {
         onToggle={() => setAdvancedOpen(!advancedOpen)}>
         <div className="dt-disclosure-body">{advanced.map(field)}</div>
       </DisclosureRow>}
+      {source.installed && source.id === 'github' && <div className="dt-row-meta" style={{ flexWrap: 'wrap' }}>
+        <span className="dt-lv-label">{t('sourceWatchedLabel')}</span>
+        {watched.length > 0 ? watched.map(repository => <Tag key={repository} tone="neutral">{repository}</Tag>)
+          : <span className="dt-hint">{t('sourceWatchedNone')}</span>}
+      </div>}
+      {source.installed && source.id === 'github' && <Hint>{t('sourceWatchedHint')}</Hint>}
     </Fields>
     <SaveBar {...draft} status={restarts && running > 0 ? t('restartInterrupts', { count: running }) : undefined}
       onDiscard={draft.discard} />
