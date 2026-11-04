@@ -3,9 +3,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import { key, type Thread } from '../core/index.ts'
 import { sameName } from '../infra/text.ts'
 import { GithubAccountsSchema } from '../deployment.ts'
-import { CliError, validItems, type Tally } from '../infra/commands.ts'
+import { CliError, validItems, type Commands, type Tally } from '../infra/commands.ts'
 import { ciCounts, ciFact, ciFailures, ciSummary, githubThreadContext, pullChecks } from './github-read.ts'
-import { branchCiTrigger, ciTrigger, commentTrigger, CommentSchema, githubAddress, issueTrigger, IssueSchema, pullTrigger, SOURCE }
+import { branchCiTrigger, ciTrigger, commentTrigger, CommentSchema, githubAddress, issueTrigger, IssueSchema, numberOfThread, pullTrigger,
+  repositoryOfThread, SOURCE, threadIdOf, type Origin }
   from './github-trigger.ts'
 import { githubLink, sendGithub } from './github-channel.ts'
 import type { GithubComment, PullRef } from './github-trigger.ts'
@@ -99,7 +100,9 @@ export const githubKind: SourceKind<GithubConfig> = {
     ],
     values: ({ deployment, trigger }) => {
       const number = trigger?.threads[0]?.source === SOURCE ? Number(trigger.meta.number) || 0 : 0
-      return { DSH_SUPERAGENT_GITHUB_REPOSITORY: deployment.repository, DSH_SUPERAGENT_GITHUB_ACCOUNT: deployment.github.login, DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: deployment.github.noreply, DSH_SUPERAGENT_GITHUB_NUMBER: number ? String(number) : '',
+      // A trigger from a Workspace's repository names it; the Source's own repository holds no such name.
+      const repository = typeof trigger?.meta.repository === 'string' ? trigger.meta.repository : deployment.repository
+      return { DSH_SUPERAGENT_GITHUB_REPOSITORY: repository, DSH_SUPERAGENT_GITHUB_ACCOUNT: deployment.github.login, DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: deployment.github.noreply, DSH_SUPERAGENT_GITHUB_NUMBER: number ? String(number) : '',
         DSH_SUPERAGENT_GITHUB_PR_HEAD: number && trigger?.meta.isPr === true ? `refs/pull/${number}/head` : '' }
     },
   },
@@ -146,22 +149,47 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
 }
 interface Round {
   started: string; signal?: AbortSignal | undefined
-  pulls: Map<number, Promise<Pull>>; read: Set<number>; failures: string[]; dropped: number[]; abandoned: number[]
+  pulls: Map<string, Promise<Pull>>; read: Set<string>; failures: string[]; dropped: string[]; abandoned: string[]
   tally: Tally
 }
 const newRound = (signal?: AbortSignal): Round => ({ started: new Date().toISOString(), signal, pulls: new Map(), read: new Set(),
   failures: [], dropped: [], abandoned: [], tally: { skipped: 0 } })
 const stopped = (ctx: SourceContext, round: Round): boolean => !!round.signal?.aborted || !ctx.config(SOURCE)
+/** One repository to poll: the Source's own, or one that a Workspace binds. */
+interface Visit { origin: Origin; commands: Commands; scope: string }
+/**
+ * Every repository this Source watches: its own first, which keeps the original Thread IDs and cursors so existing Threads
+ * stay readable, then each repository a Workspace binds, whose Thread IDs and cursors name the repository.
+ */
+export function visits(ctx: SourceContext): Visit[] {
+  const { repository } = ctx.deployment
+  const own: Visit = { origin: { repository, primary: true }, commands: ctx.commands.for(repository), scope: '' }
+  const bound = ctx.deployment.workspaces
+    .filter(workspace => workspace.repository && !sameName(workspace.repository, repository))
+    .filter((workspace, index, all) => all.findIndex(other => sameName(other.repository, workspace.repository)) === index)
+  return [own, ...bound.map(workspace => ({ origin: { repository: workspace.repository, primary: false, workspace: workspace.id },
+    commands: ctx.commands.for(workspace.repository), scope: workspace.repository }))]
+}
+/** Thread key of an Issue or PR, naming the repository when it is not the Source's own. */
+const threadKeyOf = (origin: Origin, number: number): string => `github:${threadIdOf(origin, number)}`
+/** How a Thread ID reads to an operator: `#4` for the Source's repository, `acme/widgets#4` for a Workspace's. */
+const readableThread = (threadKey: string): string => {
+  const id = threadKey.startsWith('github:') ? threadKey.slice('github:'.length) : threadKey
+  const slash = id.lastIndexOf('/')
+  return slash < 0 ? `#${id}` : `${id.slice(0, slash)}#${id.slice(slash + 1)}`
+}
+const ciThreadKey = (origin: Origin, branch: string): string => `github:${origin.primary ? `ci:${branch}` : `ci:${origin.repository}/${branch}`}`
 export interface Retry { since: string; pr: boolean; failedAt?: string; attempts?: number }
 const RETRY_WINDOW_MS = 24 * 3600_000
 /** True when GitHub returns HTTP 410 (Gone); HTTP 404 is retried because it can indicate revoked access to a private repository. */
 const deleted = (error: unknown): boolean => error instanceof CliError && error.code === 410
 /** Records a failed read on the Thread and in the round; deleted (410) or abandoned (24h+) threads do not fail the round. */
-function failed(ctx: SourceContext, round: Round, number: number, error: unknown, abandoned = false): void {
-  if (deleted(error)) round.dropped.push(number)
-  else if (abandoned) round.abandoned.push(number)
-  else round.failures.push(`#${number}: ${String(error)}`)
-  ctx.threads.patch(`github:${number}`, { pollError: String(error) })
+function failed(ctx: SourceContext, round: Round, origin: Origin, number: number, error: unknown, abandoned = false): void {
+  const label = origin.primary ? `#${number}` : `${origin.repository}#${number}`
+  if (deleted(error)) round.dropped.push(threadKeyOf(origin, number))
+  else if (abandoned) round.abandoned.push(threadKeyOf(origin, number))
+  else round.failures.push(`${label}: ${String(error)}`)
+  ctx.threads.patch(threadKeyOf(origin, number), { pollError: String(error) })
 }
 function included(raw: string): { headers: string; body: string } {
   const split = raw.search(/\r?\n\r?\n/)
@@ -179,20 +207,23 @@ const STREAMS = [
 async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
   const config = ctx.config<GithubConfig>(SOURCE)
   if (!config) return
-  for (const stream of STREAMS) {
-    if (stopped(ctx, round)) return
-    if (!stream.observed(config)) { ctx.state.set(KV.github.stream(stream.id), undefined); continue }
-    try { await readStream(ctx, round, stream.id, stream.path, config) }
-    catch (error) { if (!stopped(ctx, round)) round.failures.push(`${stream.id}: ${String(error)}`) }
+  for (const visit of visits(ctx)) {
+    const named = (what: string) => visit.scope ? `${visit.scope} ${what}` : what
+    for (const stream of STREAMS) {
+      if (stopped(ctx, round)) return
+      if (!stream.observed(config)) { ctx.state.set(KV.github.stream(visit.scope, stream.id), undefined); continue }
+      try { await readStream(ctx, round, visit, stream.id, stream.path, config) }
+      catch (error) { if (!stopped(ctx, round)) round.failures.push(`${named(stream.id)}: ${String(error)}`) }
+    }
+    // When CI observation is turned off, clear the failure baseline but preserve the revision counter so future triggers have unique IDs.
+    if (!config.observeCi) {
+      const seen = ctx.state.get(KV.github.branchCi(visit.scope))
+      ctx.state.set(KV.github.branchCi(visit.scope), seen && { revision: seen.revision })
+      continue
+    }
+    try { await pollBranchCi(ctx, round, visit) }
+    catch (error) { if (!stopped(ctx, round)) round.failures.push(`${named('default branch CI')}: ${String(error)}`) }
   }
-  // When CI observation is turned off, clear the failure baseline but preserve the revision counter so future triggers have unique IDs.
-  if (!config.observeCi) {
-    const seen = ctx.state.get(KV.github.branchCi)
-    ctx.state.set(KV.github.branchCi, seen && { revision: seen.revision })
-    return
-  }
-  try { await pollBranchCi(ctx, round) }
-  catch (error) { if (!stopped(ctx, round)) round.failures.push(`default branch CI: ${String(error)}`) }
 }
 /**
  * Polls one repository-wide event stream (oldest first) since its cursor and steps the cursor to five seconds before the
@@ -200,8 +231,8 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
  * unchanged (including when clamped to the hourly horizon), sending the last page's ETag makes an unchanged list return
  * HTTP 304 and cost no rate limit. Items from before their kind was switched on or beyond the horizon are ignored.
  */
-async function readStream(ctx: SourceContext, round: Round, id: string, path: string, config: GithubConfig): Promise<void> {
-  const name = KV.github.stream(id)
+async function readStream(ctx: SourceContext, round: Round, visit: Visit, id: string, path: string, config: GithubConfig): Promise<void> {
+  const name = KV.github.stream(visit.scope, id)
   const stored = ctx.state.get(name)
   const kinds = id === 'issues' ? [...config.observeIssues ? ['issues'] : [], ...config.observePulls ? ['pulls'] : []] : ['comments']
   const before = typeof stored?.started === 'object' ? stored.started : {}
@@ -211,7 +242,7 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   const conditional = stored?.etag && stored.since === since ? ['-H', `If-None-Match: ${stored.etag}`] : []
   let raw: string
   const listed = `${path}&sort=updated&direction=asc&per_page=100&since=${encodeURIComponent(since)}`
-  try { raw = await ctx.commands.withSignal(round.signal).api(listed, '--include', ...conditional) }
+  try { raw = await visit.commands.withSignal(round.signal).api(listed, '--include', ...conditional) }
   catch (error) {
     if (error instanceof CliError && error.code === 304) return
     throw error
@@ -229,15 +260,15 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
       const issue = IssueSchema.safeParse(item)
       const pr = issue.success && !!issue.data.pull_request
       if (!issue.success || !fresh(issue.data.created_at, pr ? 'pulls' : 'issues')) continue
-      await ctx.receive(pr ? pullTrigger(issue.data, login) : issueTrigger(issue.data, login))
-      nameThread(ctx, issue.data.number, issue.data.title)
+      await ctx.receive(pr ? pullTrigger(issue.data, login, visit.origin) : issueTrigger(issue.data, login, visit.origin))
+      nameThread(ctx, visit.origin, issue.data.number, issue.data.title)
       continue
     }
     const number = Number(/\/(?:issues|pulls)\/(\d+)$/.exec((id === 'comments' ? item.issue_url : item.pull_request_url) ?? '')?.[1])
     if (!number || !fresh(item.updated_at ?? item.created_at, 'comments')) continue
     const isPr = id === 'review-comments' || /\/pull\//.test(item.html_url ?? '')
     const ref = { number, isPr, ...item.html_url ? { url: item.html_url } : {} }
-    const trigger = commentTrigger(item, ref, id === 'comments' ? 'conversation' : 'inline', login)
+    const trigger = commentTrigger(item, ref, id === 'comments' ? 'conversation' : 'inline', login, visit.origin)
     if (trigger.text) await ctx.receive(trigger)
   }
   const newest = Math.max(...items.map(item => Date.parse(item.updated_at ?? '')).filter(Number.isFinite))
@@ -248,12 +279,12 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   ctx.state.set(name, { since: next, started, ...etag && next === since ? { etag } : {} })
 }
 /** Polls default-branch CI checks, emitting a trigger only when the set of failing checks changes after the initial baseline. */
-async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
-  const commands = ctx.commands.withSignal(round.signal)
+async function pollBranchCi(ctx: SourceContext, round: Round, visit: Visit): Promise<void> {
+  const commands = visit.commands.withSignal(round.signal)
   const { default_branch: branch } = await commands.api(z.looseObject({ default_branch: z.string() }), '')
   const head = await commands.api(z.looseObject({ sha: z.string() }), `commits/${encodeURIComponent(branch)}`)
   const snapshot = await pullChecks(commands, head.sha, round.tally)
-  const previous = ctx.state.get(KV.github.branchCi)
+  const previous = ctx.state.get(KV.github.branchCi(visit.scope))
   // The first observation after switching on or renaming the default branch establishes the baseline.
   const known = previous?.branch === branch ? previous.failures : undefined
   const failures = ciFailures(snapshot)
@@ -264,11 +295,11 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   if (known && JSON.stringify(now) !== JSON.stringify(known)) {
     revision += 1
     const summary = ciSummary(snapshot, branch, `github/commits/${head.sha}/checks`)
-    const url = `https://github.com/${ctx.deployment.repository}/commit/${head.sha}`
-    await ctx.receive(branchCiTrigger(branch, head.sha, revision, summary, url))
-    ctx.threads.describe(`github:ci:${branch}`, { label: `CI on ${branch}`, facts: { ci: ciFact(counts) } })
+    const url = `https://github.com/${visit.origin.repository}/commit/${head.sha}`
+    await ctx.receive(branchCiTrigger(branch, head.sha, revision, summary, url, visit.origin))
+    ctx.threads.describe(ciThreadKey(visit.origin, branch), { label: `CI on ${branch}`, facts: { ci: ciFact(counts) } })
   }
-  ctx.state.set(KV.github.branchCi, { branch, failures: now, revision })
+  ctx.state.set(KV.github.branchCi(visit.scope), { branch, failures: now, revision })
 }
 /**
  * One polling round: notifications, then observed repository streams, then the PRs of open tickets with their CI, then
@@ -287,20 +318,30 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
   const { count, interval } = notified.value
   if (signal?.aborted) return interval
   if (round.failures.length) throw new Error(`${round.failures.length} GitHub reads failed: ${round.failures.slice(0, 3).join('; ')}`)
-  const named = (numbers: number[]) => [...new Set(numbers)].sort((a, b) => a - b).map(number => `#${number}`).join(', ')
+  const named = (keys: string[]) => [...new Set(keys)].sort().map(readableThread).join(', ')
   const dropped = (round.dropped.length ? `; deleted on GitHub: ${named(round.dropped)}` : '')
     + (round.abandoned.length ? `; dropped after their reads kept failing: ${named(round.abandoned)}` : '')
     + (round.tally.skipped ? `; ${round.tally.skipped} unreadable items skipped` : '')
   ctx.report('github', { state: 'ready', detail: `${count} notifications; next poll ≥ ${interval}s${dropped}`, at: round.started })
   return interval
 }
-/** Reads notifications since the cursor and each Issue or PR they name, advancing the cursor atomically with the retry map for failed reads; deleted (410) Issues are dropped once their error is recorded. */
+/** Reads notifications since each repository's cursor and each Issue or PR they name, advancing the cursor atomically with the retry map for failed reads; deleted (410) Issues are dropped once their error is recorded. */
 async function pollNotifications(ctx: SourceContext, round: Round): Promise<{ count: number; interval: number }> {
+  let count = 0
+  let interval = 60
+  for (const visit of visits(ctx)) {
+    const result = await pollNotifiedRepository(ctx, round, visit)
+    count += result.count
+    interval = Math.max(interval, result.interval)
+  }
+  return { count, interval }
+}
+async function pollNotifiedRepository(ctx: SourceContext, round: Round, visit: Visit): Promise<{ count: number; interval: number }> {
   const { state } = ctx
-  const commands = ctx.commands.withSignal(round.signal)
-  const since = state.get(KV.github.since) ?? round.started
-  if (state.get(KV.github.since) === undefined) state.set(KV.github.since, since)
-  const { repository } = ctx.deployment
+  const { repository } = visit.origin
+  const commands = visit.commands.withSignal(round.signal)
+  const since = state.get(KV.github.since(visit.scope)) ?? round.started
+  if (state.get(KV.github.since(visit.scope)) === undefined) state.set(KV.github.since(visit.scope), since)
   const path = `notifications?all=true&per_page=50&since=${encodeURIComponent(since)}`
   const raw = await commands.api(path, '--include')
   const split = raw.search(/\r?\n\r?\n/)
@@ -312,7 +353,7 @@ async function pollNotifications(ctx: SourceContext, round: Round): Promise<{ co
   const notifications = /rel="next"/.test(headers)
     ? await commands.pages(NotificationSchema, path, round.tally)
     : validItems(NotificationSchema, z.array(z.unknown()).parse(JSON.parse(body)), round.tally)
-  const retries = { ...state.get(KV.github.retries) }
+  const retries = { ...state.get(KV.github.retries(visit.scope)) }
   // Failed items from the previous round run first, followed by newly notified items in chronological order; each is read once.
   const items = new Map(Object.entries(retries).map(([number, retry]) => [Number(number), retry]))
   for (const notification of notifications.reverse()) {
@@ -320,32 +361,32 @@ async function pollNotifications(ctx: SourceContext, round: Round): Promise<{ co
     const address = githubAddress(notification.subject.url ?? '', repository)
     if (!address || address.discussion || items.has(address.number)) continue
     const { number, pr } = address
-    items.set(number, { since: [state.get(KV.github.cursor(number)) ?? since, since].sort().at(-1)!, pr })
+    items.set(number, { since: [state.get(KV.github.cursor(visit.scope, number)) ?? since, since].sort().at(-1)!, pr })
   }
   for (const [number, item] of items) {
     if (stopped(ctx, round)) return { count: notifications.length, interval }
-    round.read.add(number)
+    round.read.add(threadIdOf(visit.origin, number))
     try {
-      await readNotified(ctx, round, number, item)
+      await readNotified(ctx, round, visit, number, item)
       delete retries[number]
     } catch (error) {
       if (stopped(ctx, round)) return { count: notifications.length, interval }
       const retry = { ...item, failedAt: item.failedAt ?? round.started, attempts: (item.attempts ?? 0) + 1 }
       // Abandon notification retries after 24 hours of failures so a permanently unreadable thread does not hold source health in error; its cursor stays so a later notification or thread poll still reads what was missed.
       const abandoned = Date.parse(round.started) - Date.parse(retry.failedAt) >= RETRY_WINDOW_MS
-      failed(ctx, round, number, error, abandoned)
+      failed(ctx, round, visit.origin, number, error, abandoned)
       if (!deleted(error) && !abandoned) { retries[number] = retry; continue }
       delete retries[number]
     }
   }
-  ctx.atomic(() => { state.set(KV.github.since, cursorAt(round.started)); state.set(KV.github.retries, retries) })
+  ctx.atomic(() => { state.set(KV.github.since(visit.scope), cursorAt(round.started)); state.set(KV.github.retries(visit.scope), retries) })
   return { count: notifications.length, interval }
 }
-async function readNotified(ctx: SourceContext, round: Round, number: number, item: Retry): Promise<void> {
+async function readNotified(ctx: SourceContext, round: Round, visit: Visit, number: number, item: Retry): Promise<void> {
   const { since } = item
   let isPr = item.pr
   if (!isPr) {
-    const issue = await ctx.commands.withSignal(round.signal).api(IssueSchema, `issues/${number}`)
+    const issue = await visit.commands.withSignal(round.signal).api(IssueSchema, `issues/${number}`)
     // `issues/<n>` also returns PRs with `pull_request` set; handle them in the PR branch below.
     isPr = !!issue.pull_request
     if (!isPr) {
@@ -353,36 +394,37 @@ async function readNotified(ctx: SourceContext, round: Round, number: number, it
       // A mention added by a later edit to the body is not read: only the author can be the actor of the body.
       const { login } = ctx.deployment.github
       const opened = Date.parse(issue.created_at) >= Date.parse(since) && !sameName(issue.user.login, login)
-      if (opened) await ctx.receive(issueTrigger(issue, login))
-      await intakeComments(ctx, { number, isPr: false, url: issue.html_url }, since, round)
-      nameThread(ctx, number, issue.title)
+      if (opened) await ctx.receive(issueTrigger(issue, login, visit.origin))
+      await intakeComments(ctx, visit, { number, isPr: false, url: issue.html_url }, since, round)
+      nameThread(ctx, visit.origin, number, issue.title)
     }
   }
   if (isPr) {
-    const pr = await pull(ctx, round, number)
+    const pr = await pull(ctx, round, visit, number)
     // Emit a PR description trigger for PRs opened since the cursor; its ID is the same as the one produced by the repository PR stream.
     const { login } = ctx.deployment.github
     if (pr.created_at && Date.parse(pr.created_at) >= Date.parse(since) && !sameName(pr.user.login, login)) {
       const opened = { number, title: pr.title ?? '', body: pr.body, user: pr.user, created_at: pr.created_at, html_url: pr.html_url }
-      await ctx.receive(pullTrigger(opened, login))
+      await ctx.receive(pullTrigger(opened, login, visit.origin))
     }
-    await intakeComments(ctx, { number, isPr: true, url: pr.html_url, prAuthor: pr.user.login }, since, round)
-    if (pr.title) nameThread(ctx, number, pr.title)
+    await intakeComments(ctx, visit, { number, isPr: true, url: pr.html_url, prAuthor: pr.user.login }, since, round)
+    if (pr.title) nameThread(ctx, visit.origin, number, pr.title)
   }
-  ctx.state.set(KV.github.cursor(number), cursorAt(round.started))
-  ctx.threads.patch(`github:${number}`, { pollError: undefined })
+  ctx.state.set(KV.github.cursor(visit.scope, number), cursorAt(round.started))
+  ctx.threads.patch(threadKeyOf(visit.origin, number), { pollError: undefined })
 }
 /** Reads and observes a PR at most once per polling round. */
-function pull(ctx: SourceContext, round: Round, number: number): Promise<Pull> {
-  let read = round.pulls.get(number)
+function pull(ctx: SourceContext, round: Round, visit: Visit, number: number): Promise<Pull> {
+  const id = threadIdOf(visit.origin, number)
+  let read = round.pulls.get(id)
   if (!read) {
-    read = readPull(ctx, number, round.signal).then(async pr => { await observePull(ctx, pr); return pr })
-    round.pulls.set(number, read)
+    read = readPull(visit.commands, number, round.signal).then(async pr => { await observePull(ctx, pr, visit.origin); return pr })
+    round.pulls.set(id, read)
   }
   return read
 }
-async function intakeComments(ctx: SourceContext, ref: PullRef, since: string, round: Round): Promise<void> {
-  const commands = ctx.commands.withSignal(round.signal)
+async function intakeComments(ctx: SourceContext, visit: Visit, ref: PullRef, since: string, round: Round): Promise<void> {
+  const commands = visit.commands.withSignal(round.signal)
   const { login } = ctx.deployment.github
   const kinds = ref.isPr ? ['conversation', 'inline', 'review'] as const : ['conversation'] as const
   for (const kind of kinds) {
@@ -396,64 +438,85 @@ async function intakeComments(ctx: SourceContext, ref: PullRef, since: string, r
       if (!Number.isFinite(timestamp) || timestamp < Date.parse(since)) continue
       if (sameName(comment.user.login, login)) continue
       // A review decision without a body still reaches the ticket: a worker may be waiting for that approval.
-      const trigger = commentTrigger(comment, ref, kind, login)
+      const trigger = commentTrigger(comment, ref, kind, login, visit.origin)
       if (trigger.text) await ctx.receive(trigger)
     }
   }
 }
+/** The repository a Ticket works in: the one its Workspace binds, or the Source's own when the Ticket names none. */
+export function visitOfTicket(ctx: SourceContext, ticket: unknown): Visit {
+  const all = visits(ctx)
+  const scope = (ticket as { mandate?: { basis?: { scope?: { workspace?: unknown } } } }).mandate?.basis?.scope
+  const id = typeof scope?.workspace === 'string' ? scope.workspace : undefined
+  return all.find(visit => visit.origin.workspace === id) ?? all[0]!
+}
 export async function pollTicketPulls(ctx: SourceContext, signal?: AbortSignal, round = newRound(signal)): Promise<void> {
-  const numbers = [...new Set(ctx.tickets.open().flatMap(ticket => pullsOf(ticket, true)))]
-  for (const number of numbers) {
-    if (stopped(ctx, round)) return
-    try {
-      const pr = await pull(ctx, round, number)
-      if (pr.state !== 'closed' && !pr.merged) await pollChecks(ctx, round, number, pr)
-    } catch (error) { if (!stopped(ctx, round)) failed(ctx, round, number, error) }
+  const tickets = ctx.tickets.open()
+  for (const ticket of tickets) {
+    const visit = visitOfTicket(ctx, ticket)
+    for (const number of [...new Set(pullsOf(ticket, true))]) {
+      if (stopped(ctx, round)) return
+      try {
+        const pr = await pull(ctx, round, visit, number)
+        if (pr.state !== 'closed' && !pr.merged) await pollChecks(ctx, round, visit, number, pr)
+      } catch (error) { if (!stopped(ctx, round)) failed(ctx, round, visit.origin, number, error) }
+    }
   }
 }
 /** Polls a PR's CI checks; only changes after the first baseline observation become Triggers. */
-async function pollChecks(ctx: SourceContext, round: Round, number: number, pr: Pull): Promise<void> {
-  const snapshot = await pullChecks(ctx.commands.withSignal(round.signal), pr.head.sha, round.tally)
+async function pollChecks(ctx: SourceContext, round: Round, visit: Visit, number: number, pr: Pull): Promise<void> {
+  const snapshot = await pullChecks(visit.commands.withSignal(round.signal), pr.head.sha, round.tally)
   const fingerprint = key(JSON.stringify(snapshot))
-  const previous = ctx.state.get(KV.github.ci(number))
+  const previous = ctx.state.get(KV.github.ci(visit.scope, number))
   if (previous?.fingerprint === fingerprint) return
   const revision = previous ? previous.revision + 1 : 0
-  if (previous) await ctx.receive(ciTrigger(pr, revision, ciSummary(snapshot, `PR #${number}`, `github/pulls/${number}/checks`)))
-  ctx.state.set(KV.github.ci(number), { fingerprint, revision })
-  ctx.threads.describe(`github:${number}`, { facts: { ci: ciFact(ciCounts(snapshot)) } })
+  if (previous) await ctx.receive(ciTrigger(pr, revision, ciSummary(snapshot, `PR #${number}`, `github/pulls/${number}/checks`), visit.origin))
+  ctx.state.set(KV.github.ci(visit.scope, number), { fingerprint, revision })
+  ctx.threads.describe(threadKeyOf(visit.origin, number), { facts: { ci: ciFact(ciCounts(snapshot)) } })
 }
-function nameThread(ctx: SourceContext, number: number, title: string): void {
-  ctx.threads.patch(`github:${number}`, { title })
-  ctx.threads.describe(`github:${number}`, { label: `#${number} ${title}`, facts: { number: { value: `#${number}` } } })
+function nameThread(ctx: SourceContext, origin: Origin, number: number, title: string): void {
+  const key = threadKeyOf(origin, number)
+  const label = origin.primary ? `#${number} ${title}` : `${origin.repository}#${number} ${title}`
+  ctx.threads.patch(key, { title })
+  ctx.threads.describe(key, { label, facts: { number: { value: `#${number}` }, ...(origin.primary ? {} : { repository: { value: origin.repository } }) } })
 }
 /** Polls subscribed Issue and PR Threads not already read in this round; a deleted (410) Issue is still polled within the horizon (costing one read) and does not fail the round. */
 export async function pollThreads(ctx: SourceContext, signal?: AbortSignal, round = newRound(signal)): Promise<void> {
   await pollEach(ctx, SOURCE, () => stopped(ctx, round), async thread => {
+    const origin = visitOfThread(ctx, thread.ref.id).origin
     try { await pollThread(ctx, round, thread) }
     catch (error) {
       if (stopped(ctx, round)) throw error
-      if (deleted(error)) round.dropped.push(Number(thread.ref.id)); else round.failures.push(`${thread.key}: ${String(error)}`)
+      if (deleted(error)) round.dropped.push(thread.ref.id)
+      else round.failures.push(`${thread.key}: ${String(error)}`)
+      if (origin) ctx.threads.patch(thread.key, { pollError: String(error) })
       throw error
     }
-  }, thread => round.read.has(Number(thread.ref.id)))
+  }, thread => round.read.has(thread.ref.id))
+}
+/** The repository a Thread ID names, or the Source's own when it names none. */
+function visitOfThread(ctx: SourceContext, id: string): Visit {
+  const all = visits(ctx)
+  return all.find(visit => !visit.origin.primary && sameName(visit.origin.repository, repositoryOfThread(id) ?? '')) ?? all[0]!
 }
 async function pollThread(ctx: SourceContext, round: Round, thread: Thread): Promise<void> {
   // The default branch's CI Thread has no Issue or PR to read; its CI arrives as Triggers.
   if (thread.ref.id.startsWith('ci:')) return
-  const number = Number(thread.ref.id)
+  const visit = visitOfThread(ctx, thread.ref.id)
+  const number = numberOfThread(thread.ref.id)
   if (!number) throw new Error('Subscribed thread has no GitHub issue or PR number')
-  round.read.add(number)
+  round.read.add(thread.ref.id)
   if (typeof thread.meta.isPr !== 'boolean' || typeof thread.meta.title !== 'string') {
-    const issue = await ctx.commands.withSignal(round.signal).api(IssueSchema, `issues/${number}`)
+    const issue = await visit.commands.withSignal(round.signal).api(IssueSchema, `issues/${number}`)
     ctx.threads.patch(thread.key, { number, isPr: !!issue.pull_request, url: issue.html_url })
-    if (issue.title) nameThread(ctx, number, issue.title)
+    if (issue.title) nameThread(ctx, visit.origin, number, issue.title)
     thread = ctx.threads.get(thread.key) ?? thread
   }
-  const checkpoint = KV.github.cursor(number)
+  const checkpoint = KV.github.cursor(visit.scope, number)
   const since = ctx.state.get(checkpoint) ?? thread.createdAt
   if (thread.meta.isPr === true) {
-    const pr = await pull(ctx, round, number)
-    await intakeComments(ctx, { number, isPr: true, url: pr.html_url, prAuthor: pr.user.login }, since, round)
-  } else await intakeComments(ctx, { number, isPr: false }, since, round)
+    const pr = await pull(ctx, round, visit, number)
+    await intakeComments(ctx, visit, { number, isPr: true, url: pr.html_url, prAuthor: pr.user.login }, since, round)
+  } else await intakeComments(ctx, visit, { number, isPr: false }, since, round)
   ctx.state.set(checkpoint, cursorAt(round.started))
 }

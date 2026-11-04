@@ -156,7 +156,10 @@ export class Runtime extends Service implements SourceHost {
           const ended = event.type === 'ticket.ended' ? store.tickets.get(event.data.ticketId) : undefined
           if (ended && setup.configured()) {
             const request = store.triggers.get(ended.origin.triggerId)?.text ?? ''
-            for (const message of pullEndNotices(ended, request, setup.deployment.repository)) outbox.send(message)
+            // The notice links the PR in the repository the ticket worked in, which is its Workspace's, not the Source's own.
+            const scope = ended.mandate?.basis?.scope as { workspace?: unknown } | undefined
+            const workspace = typeof scope?.workspace === 'string' ? setup.deployment.workspaces.find(item => item.id === scope.workspace) : undefined
+            for (const message of pullEndNotices(ended, request, workspace?.repository ?? setup.deployment.repository)) outbox.send(message)
           }
         } })
       // Update the `evals` health entry on every pass if an evaluation failed as unavailable within the last hour.

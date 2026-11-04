@@ -1244,6 +1244,36 @@ describe('observing the GitHub repository', () => {
     expect(h.store.get('github-stream:issues')).toBeUndefined()
     h.store.close()
   })
+  it('polls every repository a Workspace binds, keeping their Threads and cursors apart', async () => {
+    const h = host({ deployment: testDeployment({ workspaces: [{ id: 'default', repository: 'acme/widgets' },
+      { id: 'other', repository: 'acme/other' }] }) })
+    observe(h, { observeIssues: true })
+    h.store.set('github-since', at(-24))
+    // Both repositories have been observed before, so the Issues below are new to each.
+    for (const stream of ['github-stream:issues', 'github-stream:acme/other:issues']) {
+      h.store.set(stream, { since: at(0), started: { issues: at(0), pulls: at(0) } })
+    }
+    const gitlab = { ...issue(4, { created_at: at(3), updated_at: at(3), title: 'Other login fails' }),
+      html_url: 'https://github.com/acme/other/issues/4' }
+    // Each repository is read through its own Commands, which shares the prototype, so the stub replaces it there.
+    const prototype = Object.getPrototypeOf(h.commands) as { run: Commands['run'] }
+    vi.spyOn(prototype, 'run').mockImplementation(async (_program, args) => {
+      const bare = args[1]!.replace(/^repos\//, '').split('?')[0]!
+      const listed = (list: unknown[]) => `HTTP/2.0 200 OK\r\nETag: "same"\r\n\r\n${JSON.stringify(list)}`
+      if (bare.endsWith('notifications')) return 'HTTP/2.0 200 OK\r\n\r\n[]'
+      if (bare === 'acme/widgets/issues') return listed([issue(4, { created_at: at(2), updated_at: at(2) })])
+      if (bare === 'acme/other/issues') return listed([gitlab])
+      return JSON.stringify(args.includes('--slurp') ? [[]] : [])
+    })
+    await pollRound(h)
+    // The Source's own repository keeps the plain Thread, and a Workspace's is qualified by its repository.
+    expect(h.store.threads.get('github:4')).toMatchObject({ ref: { id: '4' }, meta: { title: 'Issue 4' } })
+    expect(h.store.threads.get('github:acme/other/4')).toMatchObject({ ref: { id: 'acme/other/4' }, meta: { title: 'Other login fails' } })
+    // Each repository remembers where its own stream read to.
+    expect(h.store.get('github-stream:issues')).toBeDefined()
+    expect(h.store.get('github-stream:acme/other:issues')).toBeDefined()
+    h.store.close()
+  })
   it('takes in the repository\'s conversation and review comments, on the Issue or PR each is on', async () => {
     const h = host()
     observe(h, { observeComments: true })

@@ -62,10 +62,12 @@ export class Commands {
    * @param resolved - returns the resolved deployment setup, or throws while setup is still pending.
    * @param environment - variables overriding `process.env` for every command (such as isolated git settings).
    */
-  constructor(private readonly resolved: () => Deployment, private readonly environment: Record<string, string | undefined>, private readonly signal: AbortSignal) {}
+  constructor(private readonly resolved: () => Deployment, private readonly environment: Record<string, string | undefined>, private readonly signal: AbortSignal, private readonly scoped?: string) {}
   get deployment(): Deployment { return this.resolved() }
-  get repository(): string { return this.deployment.repository }
-  withSignal(signal?: AbortSignal): Commands { return signal ? new Commands(this.resolved, this.environment, AbortSignal.any([this.signal, signal])) : this }
+  get repository(): string { return this.scoped ?? this.deployment.repository }
+  withSignal(signal?: AbortSignal): Commands { return signal ? new Commands(this.resolved, this.environment, AbortSignal.any([this.signal, signal]), this.scoped) : this }
+  /** The same commands restricted to one repository, for a Source that watches every repository a Workspace binds. */
+  for(repository: string): Commands { return repository === this.repository ? this : new Commands(this.resolved, this.environment, this.signal, repository) }
   async run(program: string, args: string[], cwd?: string): Promise<string> {
     try {
       const [file = program, ...argv] = invocation(program, args)

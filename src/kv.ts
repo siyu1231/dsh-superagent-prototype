@@ -42,12 +42,18 @@ export const KV = {
    * GitHub Source: notification cursor and pending retries; per-Issue/PR read cursor shared by notification and polled reads;
    * per-stream cursor, start times by kind, and ETag; default-branch CI state; and per-PR CI fingerprint and revision (`revision`
    * counts reported CI changes so each produces a distinct Trigger ID).
+   * A repository watched only through a Workspace suffixes its keys with the repository; the Source's own repository keeps the
+   * original keys, which predate Workspaces.
    */
-  github: { since: record<string>('github-since'), retries: record<Record<string, Retry>>('github-retry'),
-    cursor: family<string, [number: number]>('github-cursor:'),
-    stream: family<{ since: string; started: Record<string, string>; etag?: string }, [stream: string]>('github-stream:'),
-    branchCi: record<{ branch?: string; failures?: string[]; revision: number }>('github-branch-ci'),
-    ci: family<{ fingerprint: string; revision: number }, [number: number]>('github-ci:') },
+  github: { since: family<string, [repository: string]>('github-since', repository => repository ? `:${repository}` : ''),
+    retries: family<Record<string, Retry>, [repository: string]>('github-retry', repository => repository ? `:${repository}` : ''),
+    cursor: family<string, [repository: string, number: number]>('github-cursor:', (repository, number) => repository ? `${repository}:${number}` : String(number)),
+    stream: family<{ since: string; started: Record<string, string>; etag?: string }, [repository: string, stream: string]>('github-stream:',
+      (repository, stream) => repository ? `${repository}:${stream}` : stream),
+    branchCi: family<{ branch?: string; failures?: string[]; revision: number }, [repository: string]>('github-branch-ci',
+      repository => repository ? `:${repository}` : ''),
+    ci: family<{ fingerprint: string; revision: number }, [repository: string, number: number]>('github-ci:',
+      (repository, number) => repository ? `${repository}:${number}` : String(number)) },
   /**
    * Feishu Source: known chats (`true` for direct messages); per-chat history cursor and active topics mapped from topic ID
    * to last-seen timestamp; and per-polled-thread seen message IDs and initialization flag.
