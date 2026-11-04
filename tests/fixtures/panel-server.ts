@@ -109,6 +109,8 @@ export interface PanelServer {
   opened: string[]
   dropped: DroppedReply[]
   failing: Extract<Problem, { kind: 'outgoing' }>['outgoing'][]
+  /** Workspaces DSH itself lists, which the panel offers beside the bound ones. */
+  workspaces: ApiResponse<'GET workspaces'>['workspaces']
 }
 export let server: PanelServer
 
@@ -251,6 +253,8 @@ function initial(): PanelServer {
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
+    workspaces: [{ id: 'w1', path: '/srv/apps/web', title: 'Web app', sessions: 0 },
+      { id: 'w2', path: '/srv/docs', title: 'Docs site', sessions: 2 }],
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },
@@ -303,6 +307,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   } },
   'GET sources': { answer: sourceStatuses },
   'GET settings': { answer: settingsView },
+  'GET workspaces': { answer: () => ({ workspaces: server.workspaces }) },
   'POST sources/:id/labels': { answer: () => {
     // Label refresh failures come from the bot CLI and are returned verbatim.
     if (server.joinError) return refuse(500, server.joinError)

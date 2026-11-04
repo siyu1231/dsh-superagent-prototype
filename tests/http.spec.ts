@@ -28,7 +28,8 @@ function serve(runtime: Partial<Record<keyof HttpHost, unknown>>, host = '127.0.
 it('answers each kind of failure with its own status', async () => {
   const saves: unknown[] = []
   const call = serve({
-    store: { tickets: { get: () => undefined }, blockRevision: () => 0 },
+    store: { tickets: { get: () => undefined }, blockRevision: () => 0, settings: () => ({ workspaces: [] }) },
+    workspaces: { list: () => [], create: async () => ({ id: 'w' }) },
     sources: { instances: () => [{ id: 'github' }] },
     settings: { save: async (...args: unknown[]) => {
       saves.push(args)
@@ -97,4 +98,24 @@ it('answers a prompt save that lost a race with 409, and a settings body over 12
   expect(await call('PUT', 'settings/executor', { value, revision: 0 })).toEqual({ status: 400,
     body: { error: `Request exceeds ${128 * 1024} bytes` } })
   expect(saves).toEqual([])
+})
+
+it('lists the Workspaces DSH holds, and registers a bound directory that DSH does not list yet', async () => {
+  const created: string[] = []
+  const call = serve({
+    store: { blockRevision: () => 0, settings: () => ({ workspaces: [
+      { id: 'web', name: 'Web app', directory: '/srv/apps/web', repository: '', prepare: '', enabled: true },
+      { id: 'docs', name: 'Docs site', directory: '/srv/docs', repository: '', prepare: '', enabled: true },
+      // A Workspace without a directory runs under the Execution root, so DSH has no folder to list.
+      { id: 'root', name: 'Root', directory: '', repository: '', prepare: '', enabled: true },
+    ] }) },
+    workspaces: { list: () => [{ id: 'w1', path: '/srv/apps/web', title: 'Web app', sessionIds: ['s1'] }],
+      create: async (path: string) => { created.push(path); return { id: 'w2' } } },
+    settings: { save: async () => ({ saved: true, revision: 1, restarting: false }) },
+  })
+  expect(await call('GET', 'workspaces')).toEqual({ status: 200,
+    body: { workspaces: [{ id: 'w1', path: '/srv/apps/web', title: 'Web app', sessions: 1 }] } })
+  expect(await call('PUT', 'settings/workspaces', { value: [], revision: 0 })).toMatchObject({ status: 200 })
+  // Web app is already listed, and the Execution root has no folder of its own.
+  expect(created).toEqual(['/srv/docs'])
 })

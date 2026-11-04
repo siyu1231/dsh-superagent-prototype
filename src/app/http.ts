@@ -27,6 +27,7 @@ import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
 import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
+import { adopt, workspaceEntries, type WorkspaceRegistry } from './workspaces.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -40,6 +41,8 @@ export interface HttpHost {
   readonly executor: Pick<DshExecutor, 'activeCount'>
   readonly health: Record<string, Health>
   readonly machine: Machine
+  /** DSH's Workspace list: the working directories the panel offers, and where a bound directory is registered. */
+  readonly workspaces: WorkspaceRegistry
   readonly masterId: string
   /** Resolves once startup finishes or setup determines what is still missing. */
   readonly ready: Promise<void>
@@ -148,6 +151,17 @@ const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor', 'workspaces']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 
+/**
+ * Registers every bound directory in DSH's Workspace list. A directory DSH refuses — one that no longer exists, say — is
+ * skipped rather than failing the save: the binding still decides where Tickets run, only the sidebar entry is missing.
+ */
+async function adoptBound(registry: WorkspaceRegistry, workspaces: readonly { directory: string; name: string }[]): Promise<void> {
+  for (const workspace of workspaces) {
+    if (!workspace.directory) continue
+    await adopt(registry, workspace.directory, workspace.name || undefined).catch(() => { /* the sidebar entry is optional */ })
+  }
+}
+
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
   const ticket = (id: string) => { if (!store.tickets.get(id)) throw new RouteError(404, 'Ticket not found'); return id }
@@ -159,6 +173,7 @@ function routes(runtime: HttpHost): Routes {
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),
     'GET settings': () => settingsView(store, runtime.sources, runtime.health, setupState(runtime), runtime.machine.stateDir),
+    'GET workspaces': () => ({ workspaces: workspaceEntries(runtime.workspaces) }),
     'POST sources/:id/labels': ({ params }) => runtime.settings.refreshLabels(params.id),
     'GET threads': ({ query }) => {
       const { filter, offset, limit } = ThreadsQuery.parse(query)
@@ -198,7 +213,10 @@ function routes(runtime: HttpHost): Routes {
       const known = !block.startsWith('source:') || runtime.sources.instances().some(instance => `source:${instance.id}` === block)
       if (!known) throw new RouteError(404, 'Source not found')
       const request = SaveRequest.parse(await body())
-      return runtime.settings.save(block, request.value, request.revision, 'panel')
+      const saved = await runtime.settings.save(block, request.value, request.revision, 'panel')
+      // A bound directory is the same folder DSH lists in its own sidebar, so register it there when it is new.
+      if (block === 'workspaces') await adoptBound(runtime.workspaces, store.settings().workspaces)
+      return saved
     },
     'GET policy/history': () => policyHistory(store, runtime.sources, policyVersion(store.settings())),
     'POST policy-sync/:id': async ({ params }) => ({ policy: await runtime.settings.sync(params.id) }),
