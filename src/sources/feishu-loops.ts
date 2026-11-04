@@ -14,6 +14,7 @@ import { health, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
 import { cursorAt, POLL_HORIZON_MS, polled, pollThreads as pollEach } from './poll.ts'
 import type { FeishuConfig } from './feishu.ts'
+import { IS_WINDOWS, invocation } from '../infra/platform.ts'
 
 export const runFeishu = (ctx: SourceContext, signal: AbortSignal): Promise<unknown> =>
   Promise.allSettled([watch, backfillLoop, chatNamesLoop].map(loop => loop(ctx, signal)))
@@ -68,12 +69,20 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
 export const consumerRetry = (previous: number | undefined, ranMs: number): number =>
   previous === undefined || ranMs >= 60_000 ? 1000 : Math.min(previous * 2, 60_000)
 async function consume(ctx: SourceContext, signal: AbortSignal): Promise<void> {
-  const child = spawn(bot(ctx).cli, ['event', 'consume', 'im.message.receive_v1', '--as', 'bot'],
-    { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
+  const cli = bot(ctx).cli
+  const [program = cli, ...args] = invocation(cli, ['event', 'consume', 'im.message.receive_v1', '--as', 'bot'])
+  const child = spawn(program, args,
+    { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
       LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
   const stdout = createInterface({ input: child.stdout }); const stderr = createInterface({ input: child.stderr })
   let chain = Promise.resolve(); let diagnostic = ''; let ready = false
-  const stop = (): void => { child.stdin.end(); child.kill('SIGTERM') }
+  // A Windows consumer runs under `cmd.exe`, so ending it means ending the tree; a bare `kill` would leave the CLI streaming.
+  const stop = (): void => {
+    child.stdin.end()
+    if (IS_WINDOWS && child.pid) spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', 'taskkill', '/pid', String(child.pid), '/t', '/f'],
+      { stdio: 'ignore', windowsHide: true }).once('exit', () => { child.kill() })
+    else child.kill('SIGTERM')
+  }
   signal.addEventListener('abort', stop, { once: true })
   const timeout = setTimeout(() => { diagnostic = 'Feishu event consumer did not become ready within 45 seconds'; stop() }, 45_000)
   stderr.on('line', (line: string) => {

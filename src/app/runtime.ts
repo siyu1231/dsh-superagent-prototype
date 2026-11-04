@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
@@ -51,6 +51,9 @@ import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
 const now = (): string => new Date().toISOString()
 
+/** Age at which a state directory lock nobody owns is stolen, in milliseconds. */
+const LOCK_STALE_MS = 15_000
+
 /**
  * Composition root of dsh-superagent that connects `Store`, `Setup`, `Engine`, `SourceRegistry`, `Effects`, `Outbox`, `Passes`, `Sessions`, `Settings`, `Prompts`, `DshExecutor`, and `MasterAssessor`.
  * Exposes the `SourceHost` service on the Cordis context for source plugins and coordinates startup, setup checks, HTTP route registration, and graceful shutdown.
@@ -90,7 +93,11 @@ export class Runtime extends Service implements SourceHost {
     // Lock the state directory before opening the database so another process cannot migrate or write concurrently.
     mkdirSync(machine.stateDir, { recursive: true, mode: 0o700 })
     const compromised = (error: Error) => { this.runtimeHealth.set({ state: 'error', detail: error.message }); this.stopped.abort() }
-    const release = lockSync(machine.stateDir, { stale: 30_000, onCompromised: compromised })
+    // A lock left behind by a killed process would otherwise refuse every restart until it ages out, so it is reclaimed
+    // first: the lock names its owner, and a lock whose owner is gone belongs to nobody.
+    reclaimLock(machine.stateDir)
+    const release = lockSync(machine.stateDir, { stale: LOCK_STALE_MS, onCompromised: compromised })
+    writeFileSync(join(machine.stateDir, 'runtime.pid'), String(process.pid))
     this.releaseLock = async () => { release() }
     let opened: Store | undefined
     try {
@@ -251,4 +258,24 @@ export class Runtime extends Service implements SourceHost {
       }
     }
   }
+}
+
+/** True while a process with this id is still running, which is why its lock must be left alone. */
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
+/**
+ * Removes the state directory lock of a process that is gone. The lock names its owner in `runtime.pid`, so a restart
+ * after a crash or a killed process recovers immediately; a lock with no readable owner is removed only once it is older
+ * than the moment `proper-lockfile` itself would steal it, `LOCK_STALE_MS`.
+ */
+function reclaimLock(stateDir: string): void {
+  const lock = `${stateDir}.lock`
+  try { if (!statSync(lock).isDirectory()) return } catch { return }
+  let owner = 0
+  try { owner = Number(readFileSync(join(stateDir, 'runtime.pid'), 'utf8')) } catch { owner = 0 }
+  if (owner > 0 && alive(owner)) return
+  if (owner <= 0 && Date.now() - statSync(lock).mtimeMs <= LOCK_STALE_MS) return
+  rmSync(lock, { recursive: true, force: true })
 }

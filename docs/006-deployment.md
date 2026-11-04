@@ -26,6 +26,14 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
 - A model provider configured for DeepSeek Harness. dsh-superagent uses the profile's default model unless the Eval or Execution settings name another.
 - For Feishu: `lark-cli` (tested with 1.0.90) and a Feishu or Lark app with a bot
 
+On Windows the plugin runs as it does on POSIX, with these differences:
+
+- `stateDir` and Ticket directories are Windows absolute paths, such as `C:\dsh-superagent`.
+- Commands resolve through `PATH` and `PATHEXT`, and a batch file or `.cmd` shim is started through `cmd.exe`. The command shims in `worker-bin` are `.cmd` files.
+- A prepare command runs in PowerShell (`pwsh` when installed, otherwise `powershell.exe`), not in `sh`, so write it in PowerShell syntax: `$env:DSH_SUPERAGENT_DIR`, not `$DSH_SUPERAGENT_DIR`.
+- Python and tmux are needed only by the POSIX service script of [Start and stop](#start-and-stop); on Windows run `dsh superagent` directly under a supervisor of your choice.
+- The state directory's protection is the profile's ACL; there are no POSIX permission bits to set.
+
 ## Accounts
 
 ### Agent GitHub account
@@ -80,7 +88,7 @@ dsh superagent --from-default-profile web --dump-config > /dev/null
 dsh plugin --profile superagent add "link:$PWD"
 ```
 
-The pinned version above is public; other versions must satisfy `engines.dsh` in `package.json`.
+The pinned version above is public; other versions must satisfy `engines.dsh` in `package.json`. On Windows use the same commands in PowerShell; `"link:$PWD"` expands to the checkout's absolute path.
 
 The fourth command creates `~/.dsh/profiles/superagent` from the DeepSeek Harness Web template. The fifth installs this bundle. Set `DSH_HOME` to relocate the default `~/.dsh` directory.
 
@@ -105,6 +113,8 @@ scripts/dsh-superagent status
 ```
 
 `start` runs `dsh --profile superagent` in tmux session `dsh-superagent`, or `dsh-<profile>` for another profile. It waits up to one minute for the runtime to become ready or report a setup requirement. On a first run it prints the missing setup information. It refuses duplicate instances, including ones started outside this script.
+
+On Windows the service script does not run: tmux and the POSIX tools it uses are absent. Start `dsh superagent` yourself, for example as a scheduled task or a service wrapper, and stop it with the stop command of that supervisor. The runtime reclaims the state directory lock of a process that is gone, so a killed instance restarts immediately.
 
 `stop` and `restart` request graceful shutdown and wait up to five minutes for Executors. They never force-kill the process or touch other tmux sessions.
 

@@ -3,13 +3,16 @@
  * Variables read by workers avoid `KEY|PASSWORD|SECRET|TOKEN` in their names because DSH strips credential-shaped variables from child environments.
  * Provides default-path guardrails rather than an OS-level security boundary, as workers run under the operator's OS user.
  */
+import { execFile } from 'node:child_process'
 import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
-import { delimiter, join, resolve } from 'node:path'
+import { delimiter, join, normalize, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import type { SubprocessOutputReader, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type { Deployment } from '../deployment.ts'
 import { SetupError } from '../setup.ts'
 import { CliError } from './commands.ts'
+import { cmdQuote, cmdText, IS_WINDOWS, invocation, unquote } from './platform.ts'
 
 const MARKER = '# Written by dsh-superagent on every start; edits are lost.'
 /** Markers of files written under the project's earlier names (`dsh-tag`, `dsh-go`, `dsh-freelancer`), which `dsh-superagent` owns and replaces too. */
@@ -22,9 +25,10 @@ const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")
 const gitQuote = (value: string): string => `"${value.replace(/[\\"]/g, char => `\\${char}`)}"`
 export const credentialHelper = (cli: string): string => `!${shellQuote(cli)} auth git-credential`
 
+/** Compares two paths after resolving links; Windows compares case-insensitively because its file systems do. */
 export function sameDirectory(a: string, b: string): boolean {
-  const real = (path: string): string => { try { return realpathSync(path) } catch { return resolve(path) } }
-  return real(a) === real(b)
+  const real = (path: string): string => { try { return normalize(realpathSync(unquote(path))) } catch { return normalize(resolve(unquote(path))) } }
+  return IS_WINDOWS ? real(a).toLowerCase() === real(b).toLowerCase() : real(a) === real(b)
 }
 export function withoutDirectory(path: string, dir: string): string {
   return path.split(delimiter).filter(entry => !sameDirectory(entry, dir)).join(delimiter)
@@ -57,11 +61,12 @@ export function agentVariables(stateDir: string): Record<string, string | undefi
   }
 }
 
-/** True when a regular file starts with the dsh-superagent marker in its first two lines; a symbolic link, directory, or other non-regular file never counts as written by dsh-superagent. */
+/** True when a regular file carries the dsh-superagent marker in its first two lines; a symbolic link, directory, or other non-regular file never counts as written by dsh-superagent. */
 async function written(file: string): Promise<boolean> {
   if (!(await lstat(file)).isFile()) return false
+  // The marker is shown in a shell or batch comment, and Windows line endings leave a trailing carriage return.
   const head = (await readFile(file, 'utf8')).split('\n', 2)
-  return [MARKER, ...LEGACY_MARKERS].some(marker => head.includes(marker))
+  return [MARKER, ...LEGACY_MARKERS].some(marker => head.some(line => line.includes(marker)))
 }
 async function own(file: string, text: string, mode = 0o644): Promise<void> {
   let foreign = false
@@ -70,6 +75,26 @@ async function own(file: string, text: string, mode = 0o644): Promise<void> {
   const temporary = `${file}.${process.pid}.tmp`
   await writeFile(temporary, text, { mode })
   await rename(temporary, file)
+}
+
+const executed = promisify(execFile)
+/**
+ * The TLS settings git needs on Windows. Git for Windows negotiates HTTPS through schannel, and the machine's choice of
+ * backend and revocation checking lives in the system and global configuration files that a worker's git ignores. Without
+ * them HTTPS fetches fail before any credential is asked for, typically with `CRYPT_E_NO_REVOCATION_CHECK`.
+ */
+const GIT_TLS_SETTINGS: readonly string[] = ['http.sslBackend', 'http.schannelCheckRevoke']
+/** Reads the operator's machine-wide values for `GIT_TLS_SETTINGS`, ignoring the worker overrides the host process may carry. */
+async function tlsSettings(): Promise<string[]> {
+  const env = { ...process.env }
+  for (const name of ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS']) delete env[name]
+  const values: string[] = []
+  for (const name of GIT_TLS_SETTINGS) {
+    const value = await executed('git', ['config', '--get', name], { env, timeout: 20_000, windowsHide: true })
+      .then(({ stdout }) => stdout.trim()).catch(() => '')
+    if (value) values.push(`\t${name.slice('http.'.length)} = ${value}`)
+  }
+  return values.length ? ['[http]', ...values] : []
 }
 
 /**
@@ -84,19 +109,38 @@ export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' |
   for (const name of before) { const file = join(dir, name); if (!await written(file)) throw new SetupError('foreignFile', { file }) }
   // Workers may be running concurrently: write each shim to a temp file and atomically rename it so no command ever resolves past the shim directory.
   const kept = new Set<string>()
+  // PowerShell only runs files whose PATHEXT extension it recognizes, so a Windows shim is a batch file named `<name>.cmd`.
+  const shimFile = (name: string): string => IS_WINDOWS ? `${name}.cmd` : name
   const shim = async (name: string, body: string): Promise<void> => {
-    const temporary = join(dir, `.${name}.${process.pid}.tmp`)
-    await writeFile(temporary, `#!/bin/sh\n${MARKER}\n${body}\n`, { mode: 0o755 })
-    await rename(temporary, join(dir, name))
-    kept.add(name)
+    const file = shimFile(name)
+    const temporary = join(dir, `.${file}.${process.pid}.tmp`)
+    const text = IS_WINDOWS ? `@echo off\nREM ${MARKER}\n${body}\n` : `#!/bin/sh\n${MARKER}\n${body}\n`
+    await writeFile(temporary, text, { mode: 0o755 })
+    await rename(temporary, join(dir, file))
+    kept.add(file)
   }
   const withoutShims = [
     `self=${shellQuote(dir)}`, 'rest=', 'IFS=:', 'set -f',
     'for entry in $PATH; do [ "$entry" = "$self" ] || rest="${rest:+$rest:}$entry"; done',
     'set +f', 'unset IFS', 'PATH=$rest', 'export PATH',
   ].join('\n')
-  const run = (program: string): string => `${withoutShims}\nexec ${shellQuote(program)} "$@"`
-  const fail = (message: string): string => `echo ${shellQuote(message)} >&2\nexit 1`
+  // A batch file cannot nest `%~dp0` inside a `%PATH:…=%` substitution (`%PATH:%~dp0;=%` yields the literal `~dp0`), so
+  // the directory is copied to a variable first and each entry is compared as its own quoted word.
+  const withoutShimsWindows = [
+    'setlocal EnableDelayedExpansion',
+    'set "SELF=%~dp0"',
+    'set "SELF=!SELF:~0,-1!"',
+    'set "REST="',
+    'for %%E in ("!PATH:;=" "!") do if /i not "%%~E"=="!SELF!" set "REST=!REST!;%%~E"',
+    'if defined REST set "PATH=!REST:~1!"',
+  ].join('\n')
+  const run = (program: string): string => IS_WINDOWS
+    ? `${withoutShimsWindows}\n${cmdQuote(program)} %*\nexit /b %ERRORLEVEL%`
+    : `${withoutShims}\nexec ${shellQuote(program)} "$@"`
+  // cmd echoes the space before a redirection, so the redirection comes first and the message keeps its exact text.
+  const fail = (message: string): string => IS_WINDOWS
+    ? `>&2 echo ${cmdText(message)}\nexit /b 1`
+    : `echo ${shellQuote(message)} >&2\nexit 1`
   await shim('gh', run(github.cli))
   await shim('lark-cli', feishu ? run(feishu.cli) : fail('lark-cli is unavailable: this installation has no Feishu bot.'))
   for (const name of new Set(blockedCommands.filter(name => !WORKER_COMMANDS.includes(name)))) {
@@ -110,6 +154,7 @@ export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' |
     '[credential]', '\thelper =',
     '[credential "https://github.com"]', `\thelper = ${gitQuote(credentialHelper(github.cli))}`,
     '[url "https://github.com/"]', '\tinsteadOf = git@github.com:', '\tinsteadOf = ssh://git@github.com/',
+    ...IS_WINDOWS ? await tlsSettings() : [],
     // Include Git LFS filters because the operator's global gitconfig (which usually holds them) is ignored.
     '[filter "lfs"]', '\tclean = git-lfs clean -- %f', '\tsmudge = git-lfs smudge -- %f', '\tprocess = git-lfs filter-process', '\trequired = true',
   ].join('\n') + '\n')
