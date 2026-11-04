@@ -152,7 +152,7 @@ const TEXT = {
   sourceEnable: ['运行来源：{name}', 'Run Source: {name}'],
   sourceWatchedLabel: ['工作目录监听的仓库', 'Repositories the Workspaces watch'],
   sourceWatchedNone: ['还没有工作目录绑定仓库', 'No Workspace binds a repository yet'],
-  sourceWatchedHint: ['仓库来自工作目录：每个工作目录可以在「执行 › 工作目录」里绑定一个。上面的输入框只是额外再加一个，可以留空。', 'Repositories come from the Workspaces: each can bind one under Execution › Workspaces. The field above only adds one more, and may stay empty.'],
+  sourceWatchedHint: ['仓库只由工作目录决定：每个工作目录在「执行 › 工作目录」里绑定一个，来源只负责账号和接收哪些事件。', 'Repositories come from the Workspaces only: each binds one under Execution › Workspaces, and this Source only holds the account and what it receives.'],
   addRow: ['添加', 'Add'],
   removeRow: ['移除：{name}', 'Remove: {name}'],
   sourceFilteredTitle: ['24 小时内最近被过滤的触发', 'Latest Triggers filtered in the last 24 hours'],
@@ -754,7 +754,7 @@ const TEXT = {
   'userError.noLabels': ['这个来源没有可以刷新的名称。', USER_ERRORS.noLabels[1]],
   'userError.nothingToSync': ['{source} 来源上的策略没有指定从哪里同步，或者这个来源已关闭或在等待部署检查。', USER_ERRORS.nothingToSync[1]],
   // Setup problems and health codes; English reuses the host's own text read by the log and main Session
-  'setup.repositoryUnset': ['GitHub 来源没有设置监听的仓库。', SETUP_PROBLEMS.repositoryUnset[1]],
+  'setup.repositoryUnset': ['还没有工作目录绑定 GitHub 仓库，来源没有可监听的仓库。', SETUP_PROBLEMS.repositoryUnset[1]],
   'setup.foreignFile': ['{file} 不是 dsh-superagent 写入的文件；移走它，或换一个状态目录。', SETUP_PROBLEMS.foreignFile[1]],
   'setup.gitTooOld': ['git 没有读取 dsh-superagent 为 github.com 写的凭据配置；需要 git 2.32 或更新版本。', SETUP_PROBLEMS.gitTooOld[1]],
   'setup.environmentFailed': ['准备智能体的运行环境失败。', SETUP_PROBLEMS.environmentFailed[1]],

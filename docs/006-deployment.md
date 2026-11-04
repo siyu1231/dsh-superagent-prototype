@@ -154,7 +154,7 @@ Check dsh-superagent: run `scripts/dsh-superagent --profile superagent status` i
 
 Setup must succeed before polling or work starts. Overview lists missing requirements and links to their settings. A settings change runs setup again. If you fix something outside the application, such as CLI authentication, choose **Check again**.
 
-1. **Sources.** Set the agent CLI, for example `/home/me/.local/bin/gh-agent`, and, if no Workspace binds a repository, the GitHub repository (`owner/name`) on the **One more repository** field. Requests normally arrive through the agent account's notifications. A new Issue or comment mentioning the account arrives on the next poll; adding a mention by editing an existing Issue body does not. Post a new comment instead. A Workspace that binds a repository of its own is watched too, and its Issues and pull requests get Threads named `<owner>/<name>#<number>` so the same number in two repositories stays apart. For Feishu, set the bot CLI, chats, each chat's receive-all or mentions-only mode, and whether to receive direct messages.
+1. **Sources.** Set the agent CLI, for example `/home/me/.local/bin/gh-agent`. The card holds the account and what it receives, not a repository: every repository comes from a Workspace, and the card lists the ones the Workspaces bind. Requests normally arrive through the agent account's notifications. A new Issue or comment mentioning the account arrives on the next poll; adding a mention by editing an existing Issue body does not. Post a new comment instead. An Issue or pull request in a Workspace's repository gets a Thread named `<owner>/<name>#<number>`, so the same number in two repositories stays apart. For Feishu, set the bot CLI, chats, each chat's receive-all or mentions-only mode, and whether to receive direct messages.
 2. **Policy.** The two example rules can be edited or removed. Under **On each Source**, add the GitHub accounts and Feishu users who may ask for work; until a list has someone, no request can become a Ticket. With Feishu, a chat can be chosen to sync the list from, at startup and on **Sync now**.
 3. **Execution.** The directory root and a prepare command. To give each Ticket a checkout of the repository:
 
@@ -266,7 +266,7 @@ Setup problems appear on the overview with a link to the fix, in the panel's lan
 | `The agent GitHub CLI was not found.` | Set the wrapper's absolute path, or a command name on `PATH` |
 | `The agent GitHub CLI cannot read its account` | Sign the wrapper in with `auth login` |
 | `@… cannot read …` or `@… cannot push to …` | Give the agent account write access to the repository |
-| `The GitHub Source names no repository.` | Bind `owner/name` to a Workspace under **Execution › Workspaces**, or set it on the GitHub card |
+| `No Workspace binds a repository, so the GitHub Source has none to watch.` | Bind `owner/name` to a Workspace under **Execution › Workspaces** |
 | A Ticket fails with `The prepare command failed: …` | The output names the cause, such as a wrong clone path; fix the command, then retry the Ticket |
 | `git does not read the github.com credential configuration dsh-superagent writes` | Install git 2.32 or later |
 | A Ticket fails with `The git configuration of the repository in … sets …` | Remove the named credential or `http.*.extraheader` settings from the clone's `.git/config` |

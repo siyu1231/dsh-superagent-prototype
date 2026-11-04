@@ -39,11 +39,9 @@ function scopeOf(meta: Record<string, unknown>): Scope | undefined {
 export const githubKind: SourceKind<GithubConfig> = {
   kind: SOURCE,
   title: { zh: 'GitHub', en: 'GitHub' },
-  description: { zh: '智能体的 GitHub 账号；接收仓库里发给它的通知、已订阅 Issue 与 PR 的讨论、CI 状态变化和 PR 合并关闭。', en: 'The agent\'s GitHub accounts; receives notifications to it in the repository, discussion on subscribed Issues and PRs, CI changes, and PR merge or close.' },
+  description: { zh: '智能体的 GitHub 账号；接收工作目录绑定的仓库里发给它的通知、已订阅 Issue 与 PR 的讨论、CI 状态变化和 PR 合并关闭。仓库在「执行 › 工作目录」里绑定，不在这里设置。', en: 'The agent\'s GitHub account; receives notifications to it in the repositories the Workspaces bind, discussion on subscribed Issues and PRs, CI changes, and PR merge or close. Repositories are bound under Execution › Workspaces, not here.' },
   schema: GithubConfigSchema,
   fields: [
-    { key: 'repository', type: 'text', pattern: '[A-Za-z0-9_.\\-]+/[A-Za-z0-9_.\\-]+', label: { zh: '再监听一个仓库（可选）', en: 'One more repository (optional)' },
-      hint: { zh: '写作 owner/name。仓库由工作目录决定：每个工作目录可以在「执行 › 工作目录」里绑定一个，所以这里可以留空。填了的话，除了那些仓库，这一个也一起接收通知和讨论；保存时检查智能体账号能否推送到它，然后重启 dsh-superagent。', en: 'Written owner/name. Workspaces decide the repositories: each can bind one under Execution › Workspaces, so this may stay empty. When filled in, this repository is received beside them, and saving checks that the agent account can push to it, then restarts dsh-superagent.' } },
     { key: 'cli', type: 'text', label: { zh: '智能体的 GitHub CLI', en: 'Agent GitHub CLI' },
       hint: { zh: '命令名或绝对路径，通常是用 GH_CONFIG_DIR 登录智能体账号的 gh 包装脚本。智能体以它登录的账号行事，执行器以 gh 调用它。保存时检查它登录的账号能否推送到仓库，然后重启 dsh-superagent。', en: 'A command name or absolute path, usually a gh wrapper signed in to the agent account through GH_CONFIG_DIR. The agent acts as the account it is signed in to, and the Executor calls it as gh. Saving checks that this account can push to the repository, then restarts dsh-superagent.' } },
     { key: 'pollSeconds', type: 'number', advanced: true, min: 60, max: 3600, label: { zh: '轮询间隔 / 秒', en: 'Polling interval / seconds' }, hint: { zh: 'GitHub 要求更长间隔时以 GitHub 为准。', en: 'A longer interval requested by GitHub wins.' } },
@@ -183,6 +181,8 @@ export interface Retry { since: string; pr: boolean; failedAt?: string; attempts
 const RETRY_WINDOW_MS = 24 * 3600_000
 /** True when GitHub returns HTTP 410 (Gone); HTTP 404 is retried because it can indicate revoked access to a private repository. */
 const deleted = (error: unknown): boolean => error instanceof CliError && error.code === 410
+/** True when the repository no longer holds the thread at all, as after a deployment stopped watching its repository. */
+const missing = (error: unknown): boolean => error instanceof CliError && error.code === 404
 /** Records a failed read on the Thread and in the round; deleted (410) or abandoned (24h+) threads do not fail the round. */
 function failed(ctx: SourceContext, round: Round, origin: Origin, number: number, error: unknown, abandoned = false): void {
   const label = origin.primary ? `#${number}` : `${origin.repository}#${number}`
@@ -319,7 +319,7 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
   if (signal?.aborted) return interval
   if (round.failures.length) throw new Error(`${round.failures.length} GitHub reads failed: ${round.failures.slice(0, 3).join('; ')}`)
   const named = (keys: string[]) => [...new Set(keys)].sort().map(readableThread).join(', ')
-  const dropped = (round.dropped.length ? `; deleted on GitHub: ${named(round.dropped)}` : '')
+  const dropped = (round.dropped.length ? `; no longer on GitHub: ${named(round.dropped)}` : '')
     + (round.abandoned.length ? `; dropped after their reads kept failing: ${named(round.abandoned)}` : '')
     + (round.tally.skipped ? `; ${round.tally.skipped} unreadable items skipped` : '')
   ctx.report('github', { state: 'ready', detail: `${count} notifications; next poll ≥ ${interval}s${dropped}`, at: round.started })
@@ -480,14 +480,14 @@ function nameThread(ctx: SourceContext, origin: Origin, number: number, title: s
   ctx.threads.patch(key, { title })
   ctx.threads.describe(key, { label, facts: { number: { value: `#${number}` }, ...(origin.primary ? {} : { repository: { value: origin.repository } }) } })
 }
-/** Polls subscribed Issue and PR Threads not already read in this round; a deleted (410) Issue is still polled within the horizon (costing one read) and does not fail the round. */
+/** Polls subscribed Issue and PR Threads not already read in this round; a Thread its repository no longer holds is dropped instead of failing the round. */
 export async function pollThreads(ctx: SourceContext, signal?: AbortSignal, round = newRound(signal)): Promise<void> {
   await pollEach(ctx, SOURCE, () => stopped(ctx, round), async thread => {
     const origin = visitOfThread(ctx, thread.ref.id).origin
     try { await pollThread(ctx, round, thread) }
     catch (error) {
       if (stopped(ctx, round)) throw error
-      if (deleted(error)) round.dropped.push(thread.ref.id)
+      if (deleted(error) || missing(error)) round.dropped.push(thread.ref.id)
       else round.failures.push(`${thread.key}: ${String(error)}`)
       if (origin) ctx.threads.patch(thread.key, { pollError: String(error) })
       throw error

@@ -614,7 +614,7 @@ describe('github source', () => {
     expect(h.store.get('github-cursor:14')).toBeUndefined()
     expect(h.store.threads.get('github:14')!.meta.pollError).toContain('deleted')
     // Without a Thread to keep it, the Source's health names it.
-    expect(h.health.github).toMatchObject({ state: 'ready', detail: '2 notifications; next poll ≥ 60s; deleted on GitHub: #14, #15' })
+    expect(h.health.github).toMatchObject({ state: 'ready', detail: '2 notifications; next poll ≥ 60s; no longer on GitHub: #14, #15' })
     // GitHub also answers 404 for a private repository the agent lost access to: that is a failure read again.
     github(h, { notifications: [notification(16)] })
     await expect(pollRound(h)).rejects.toThrow('#16: Error: gh: Not Found (HTTP 404)')
@@ -757,7 +757,19 @@ describe('github source', () => {
     })
     // With every failure a 410, the round succeeds and names what GitHub deleted.
     await pollRound(h)
-    expect(h.health.github).toMatchObject({ state: 'ready', detail: expect.stringContaining('deleted on GitHub: #5, #7, #8') })
+    expect(h.health.github).toMatchObject({ state: 'ready', detail: expect.stringContaining('no longer on GitHub: #5, #7, #8') })
+    h.store.close()
+  })
+  it('drops a subscribed Issue its repository no longer holds, instead of failing the round', async () => {
+    const h = host()
+    h.store.set('github-since', '2026-09-08T00:00:00.000Z')
+    subscribed(h, { source: 'github', id: '4' }, { number: 4, isPr: false, title: 'Left behind' })
+    github(h, { notifications: [], 'issues/4/comments': refused(404, 'Not Found') })
+    // A deployment that stopped watching a repository reads its old Threads against another one; nothing there is
+    // a reason to report the Source as failing.
+    await pollRound(h)
+    expect(h.store.threads.get('github:4')!.meta.pollError).toContain('404')
+    expect(h.health.github).toMatchObject({ state: 'ready', detail: expect.stringContaining('no longer on GitHub: #4') })
     h.store.close()
   })
   it('waits for setup, pauses while the Source is off, and counts only consecutive failed polls towards an error', async () => {

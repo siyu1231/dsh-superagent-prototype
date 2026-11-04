@@ -99,10 +99,9 @@ it('shows the account each CLI signs in as, and keeps a saved CLI on screen whil
   const github = all('.dt-card')[1]!
   expect(github.textContent).toContain('当前账号 @agent-bot')
   const labels = () => [...github.querySelectorAll('label')].map(label => label.textContent)
-  expect(labels()).toEqual(['再监听一个仓库（可选）', '智能体的 GitHub CLI'])
-  expect(field<HTMLInputElement>('再监听一个仓库（可选）').value).toBe('acme/widgets')
-  // The repositories a Workspace binds are watched too, so the card names them beside its own field.
-  expect(github.querySelector('.dt-row-meta')?.textContent).toContain('工作目录监听的仓库')
+  expect(labels()).toEqual(['智能体的 GitHub CLI'])
+  // The repositories a Workspace binds are watched too, so the card names them beside the account.
+  expect(github.querySelector('.dt-row-meta')?.textContent).toContain(zh.sourceWatchedLabel)
   expect(all('.dt-tag').map(tag => tag.textContent)).toContain('acme/web')
   // A fact describes the saved value, so an edited CLI shows none until it is saved.
   await type(field<HTMLInputElement>('智能体的 GitHub CLI'), 'gh-other')
@@ -110,7 +109,7 @@ it('shows the account each CLI signs in as, and keeps a saved CLI on screen whil
   await click(zh.discard)
   expect(github.textContent).toContain('当前账号 @agent-bot')
   await click([...github.querySelectorAll<HTMLElement>('[data-disclosure-row]')].find(row => row.textContent?.includes('高级'))!)
-  expect(labels()).toEqual(['再监听一个仓库（可选）', '智能体的 GitHub CLI', '轮询间隔 / 秒', '连续失败几次后报告异常'])
+  expect(labels()).toEqual(['智能体的 GitHub CLI', '轮询间隔 / 秒', '连续失败几次后报告异常'])
   expect(all('.dt-card')[0]!.textContent).toContain('当前机器人 Widgets Bot')
   await type(field<HTMLInputElement>('智能体的 GitHub CLI'), '/opt/bin/gh-agent')
   expect(github.textContent).toContain('保存会重启 dsh-superagent：2 个进行中的派工会中断，并带恢复说明重新开始。')
@@ -193,7 +192,7 @@ it('shows the Sources waiting for the deployment check, and the problem on the S
   // The GitHub Source is where the problem is fixed, so it shows the error; Feishu waits.
   expect(rows.map(row => row.querySelector('.dt-status-text')?.textContent)).toEqual(['等待部署检查', '出错'])
   expect(text()).not.toContain('Waiting for setup')
-  expect(rows[1]!.textContent).toContain('部署检查未通过：GitHub 来源没有设置监听的仓库。')
+  expect(rows[1]!.textContent).toContain(zh['setup.repositoryUnset'])
   await click(find(zh.sourceOpenSettings, '.dt-row button'))
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['term.source'])
 })

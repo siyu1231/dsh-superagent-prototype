@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:f
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
-import { allowedSender, policyVersion, settingsPolicy } from '../policy.ts'
+import { allowedSender, policyVersion, settingsPolicy, type Workspace } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
@@ -293,17 +293,31 @@ function reclaimLock(stateDir: string): void {
 }
 
 /**
- * Turns a deployment configured before working directories existed into its first workspace: the GitHub Source's
- * repository becomes one bound workspace keeping today's ticket root and prepare command, so nothing moves on upgrade.
- * Runs once, and an existing `workspaces` block — even an empty one the panel saved — is left alone.
+ * Moves a deployment configured before working directories existed onto them: the GitHub Source's repository becomes a
+ * bound workspace keeping today's ticket root and prepare command, and the Source stops naming one, because the
+ * repositories come from the workspaces from then on. Runs at every start, and does nothing once that is done.
  */
 export function migrateWorkspaces(store: Pick<Store, 'blockRevision' | 'settings' | 'saveSettings'>): void {
-  if (store.blockRevision('workspaces') !== 0) return
   const settings = store.settings()
   const configured = settings.sources.github?.config as { repository?: unknown } | undefined
-  const repository = typeof configured?.repository === 'string' ? configured.repository : ''
+  const repository = typeof configured?.repository === 'string' ? configured.repository.trim() : ''
   if (!repository) return
-  const workspaces = [{ id: 'default', name: repository.split('/').at(-1) ?? repository, directory: '', repository, prepare: '', enabled: true }]
-  store.saveSettings({ ...settings, workspaces },
+  const name = repository.split('/').at(-1) ?? repository
+  const bound = settings.workspaces.some(workspace => workspace.repository.toLowerCase() === repository.toLowerCase())
+  const workspaces = bound ? settings.workspaces : [...settings.workspaces,
+    { id: freshWorkspaceId(settings.workspaces, name), name, directory: '', repository, prepare: '', enabled: true }]
+  const github = settings.sources.github
+  const sources = github ? { ...settings.sources, github: { ...github, config: { ...github.config, repository: '' } } } : settings.sources
+  store.saveSettings({ ...settings, workspaces, sources },
     { source: 'internal', block: 'workspaces', policyVersion: policyVersion(settings), policyChanged: false, notified: [] })
+}
+
+/** An id no workspace holds yet, derived from the repository's name. */
+function freshWorkspaceId(workspaces: readonly Workspace[], name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+  const base = /^[a-z]/.test(slug) ? slug : `workspace-${slug || 'default'}`
+  const taken = new Set(workspaces.map(workspace => workspace.id))
+  let id = base
+  for (let suffix = 2; taken.has(id); suffix += 1) id = `${base}-${suffix}`
+  return id
 }
