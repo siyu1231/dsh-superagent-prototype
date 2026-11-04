@@ -848,6 +848,12 @@ it('reports each setup problem where the operator fixes it, and checks the agent
     await next.ready
     expect(next.setupProblem).toMatchObject({ place, code, values })
   }
+  /** Forget the Workspaces this directory migrated to, so nothing binds a repository any more. */
+  const unbind = () => {
+    const store = new Store(join(directory, 'orchestrator.sqlite'))
+    store.saveSettings({ ...store.settings(), workspaces: [] }, { source: 'panel', block: 'workspaces', policyVersion: '', policyChanged: false, notified: [] })
+    store.close()
+  }
   answers[`${AGENT()} api repos/acme/widgets --jq {name: .full_name, push: .permissions.push}`] = '{"name":"acme/widgets","push":false}\n'
   await needs('github', 'repositoryReadOnly', { account: 'agent-bot', repository: 'acme/widgets' })
   answers[`${AGENT()} api repos/acme/widgets --jq {name: .full_name, push: .permissions.push}`] = '{"name":"acme/widgets","push":true}\n'
@@ -859,6 +865,9 @@ it('reports each setup problem where the operator fixes it, and checks the agent
   // git older than 2.32 ignores GIT_CONFIG_GLOBAL and reads the operator's configuration.
   answers = { ...valid, [HELPERS]: 'file:/home/me/.gitconfig\0!gh auth git-credential\0' }
   await needs('deployment', 'gitTooOld', {})
+  // A repository is bound by a Workspace: with the Source's copy cleared, only a Workspace binding is left.
+  answers = valid
+  unbind()
   await needs('github', 'repositoryUnset', {}, { github: { repository: '' } })
   // A broken Feishu bot leaves Feishu out and says why; GitHub work goes on.
   answers = { ...valid, [`${BOT()} config strict-mode`]: 'strict-mode: off (source: profile)' }

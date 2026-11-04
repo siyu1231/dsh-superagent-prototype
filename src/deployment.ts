@@ -7,6 +7,7 @@ import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { runAsWorker, withoutDirectory, workerBin } from './infra/environment.ts'
 import { invocation, isAbsolutePath, resolveExecutable } from './infra/platform.ts'
 import { SetupError } from './setup.ts'
+import type { Workspace } from './policy.ts'
 
 const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
 const absolute = (description: string) => s.string().pattern(/^(?:[A-Za-z]:[\\/]|\\\\|\/)/).description(`${description} An absolute path: /var/lib/dsh on POSIX, C:\\dsh on Windows.`)
@@ -51,8 +52,11 @@ export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
 /** Source configuration keys that affect deployment setup and trigger a restart when changed. */
 export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
 
+/** A working directory whose GitHub repository access was verified at setup; `repository` is the canonical name, empty when unbound. */
+export interface DeploymentWorkspace { id: string; repository: string }
 export interface Deployment extends Machine {
   repository: string
+  workspaces: DeploymentWorkspace[]
   github: { cli: string; login: string; noreply: string }
   feishu?: FeishuBot
 }
@@ -85,26 +89,40 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   const result = schema.safeParse(value)
   return result.success ? result.data : undefined
 }
-/** Verify the agent's GitHub CLI identity and push access to the configured repository. */
-export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
+/**
+ * Verify the agent's GitHub CLI identity and push access to every repository a workspace binds, then to the repository
+ * configured on the GitHub Source itself. Each binding is checked so a workspace whose repository is missing or
+ * read-only fails setup instead of failing its first Ticket.
+ */
+export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? '',
+  workspaces: readonly Workspace[] = []): Promise<Deployment> {
   const { stateDir } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
-  if (!remote) throw new SetupError('repositoryUnset')
+  const bound = workspaces.filter(workspace => workspace.enabled && workspace.repository)
+  if (!remote && bound.length === 0) throw new SetupError('repositoryUnset')
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string
   try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
   const text = await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) })
   const agent = parsed(GithubUser, text)
   if (!agent) throw new SetupError('agentCliNoAccount')
-  // Use the canonical repository name returned by GitHub so renamed repositories match incoming notifications.
-  const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${remote}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {
-    throw new SetupError('repositoryUnreadable', { account: agent.login, repository: remote, output: reason(error) })
-  }))
-  if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
-  const repository = access.name
-  if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
-  return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
+  // The Source's own repository comes first so its canonical name stays the deployment's primary repository.
+  const requested: DeploymentWorkspace[] = [...remote ? [{ id: '', repository: remote }] : [],
+    ...bound.map(workspace => ({ id: workspace.id, repository: workspace.repository }))]
+  const resolved: DeploymentWorkspace[] = []
+  for (const target of requested) {
+    // Use the canonical repository name returned by GitHub so renamed repositories match incoming notifications.
+    const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${target.repository}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {
+      throw new SetupError('repositoryUnreadable', { account: agent.login, repository: target.repository, output: reason(error) })
+    }))
+    if (!access) throw new SetupError('repositoryUnreported', { repository: target.repository })
+    if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository: access.name })
+    resolved.push({ ...target, repository: access.name })
+  }
+  const repository = resolved[0]?.repository ?? ''
+  return { ...machine, repository, workspaces: resolved.map(({ id, repository: name }) => ({ id, repository: name })),
+    github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
 }
 
 const AuthStatus = z.object({ appId: z.string().regex(/^cli_[A-Za-z0-9]+$/), brand: z.enum(['feishu', 'lark']).default('feishu'), identities: z.object({ bot: z.object({ status: z.string() }) }) })

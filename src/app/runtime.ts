@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:f
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
-import { allowedSender, settingsPolicy } from '../policy.ts'
+import { allowedSender, policyVersion, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
@@ -103,6 +103,7 @@ export class Runtime extends Service implements SourceHost {
     try {
       const report = (error: unknown) => { ctx.logger.warn('dsh-superagent: %s', String(error)) }
       const store = opened = this.store = new Store(join(machine.stateDir, 'orchestrator.sqlite'), report)
+      migrateWorkspaces(store)
       const setup = this.setup = new Setup({ context: ctx, machine, lifetime: this.lifetime, restart })
       const deployed = () => setup.configured()
         ? environmentOf({ deployment: setup.deployment, sources: this.sources, settings: store.settings() }) : undefined
@@ -278,4 +279,20 @@ function reclaimLock(stateDir: string): void {
   if (owner > 0 && alive(owner)) return
   if (owner <= 0 && Date.now() - statSync(lock).mtimeMs <= LOCK_STALE_MS) return
   rmSync(lock, { recursive: true, force: true })
+}
+
+/**
+ * Turns a deployment configured before working directories existed into its first workspace: the GitHub Source's
+ * repository becomes one bound workspace keeping today's ticket root and prepare command, so nothing moves on upgrade.
+ * Runs once, and an existing `workspaces` block — even an empty one the panel saved — is left alone.
+ */
+export function migrateWorkspaces(store: Pick<Store, 'blockRevision' | 'settings' | 'saveSettings'>): void {
+  if (store.blockRevision('workspaces') !== 0) return
+  const settings = store.settings()
+  const configured = settings.sources.github?.config as { repository?: unknown } | undefined
+  const repository = typeof configured?.repository === 'string' ? configured.repository : ''
+  if (!repository) return
+  const workspaces = [{ id: 'default', name: repository.split('/').at(-1) ?? repository, directory: '', repository, prepare: '', enabled: true }]
+  store.saveSettings({ ...settings, workspaces },
+    { source: 'internal', block: 'workspaces', policyVersion: policyVersion(settings), policyChanged: false, notified: [] })
 }

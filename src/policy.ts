@@ -97,15 +97,35 @@ export const ExecutorConfigSchema = z.object({
   blockedCommands: z.array(CommandNameSchema).default([]),
 }).strict()
 export const SourceInstanceSchema = z.object({ enabled: z.boolean().default(true), config: z.record(z.string(), z.unknown()).default({}) }).strict()
+const WorkspaceIdSchema = z.string().trim().regex(/^[a-z][a-z0-9-]{0,63}$/, 'A short id: lowercase letters, digits and dashes, starting with a letter')
+/**
+ * One local working directory the Executor runs Tickets in, optionally bound to one GitHub repository.
+ * Tickets of a bound repository run under this directory; a directory hosts at most one repository, because the
+ * Ticket's own directory is a sibling of its worktrees and two repositories would share one root.
+ */
+export const WorkspaceSchema = z.object({
+  id: WorkspaceIdSchema,
+  name: z.string().trim().min(1).max(200),
+  directory: z.string().trim().refine(path => path === '' || isAbsolutePath(path), 'An absolute path, or empty for <stateDir>/work/<id>').default(''),
+  repository: z.string().trim().regex(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?$/, 'owner/name, or empty when no repository is bound').default(''),
+  prepare: z.string().max(LIMITS.prepareCommand).default(''),
+  enabled: z.boolean().default(true),
+}).strict()
+export type Workspace = z.infer<typeof WorkspaceSchema>
+export const WorkspacesSchema = z.array(WorkspaceSchema)
+  .refine(list => new Set(list.map(workspace => workspace.id)).size === list.length, 'Duplicate workspace IDs')
+  .refine(list => new Set(list.filter(workspace => workspace.repository).map(workspace => workspace.repository.toLowerCase())).size
+    === list.filter(workspace => workspace.repository).length, 'A repository can be bound to one workspace only')
 export const SettingsSchema = z.object({
   paused: z.boolean().default(false),
   sources: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), SourceInstanceSchema).default({}),
   policy: PolicyConfigSchema.default(() => PolicyConfigSchema.parse({})),
   eval: EvalConfigSchema.default(() => EvalConfigSchema.parse({})),
   executor: ExecutorConfigSchema.default(() => ExecutorConfigSchema.parse({})),
+  workspaces: WorkspacesSchema.default([]),
 }).strict()
 export type Settings = z.infer<typeof SettingsSchema>
-export type SettingsBlock = 'policy' | 'eval' | 'executor' | `source:${string}`
+export type SettingsBlock = 'policy' | 'eval' | 'executor' | 'workspaces' | `source:${string}`
 export type SettingsSave = SettingsBlock | 'pause'
 export type SettingsOrigin = 'panel' | 'tool' | 'sync'
 

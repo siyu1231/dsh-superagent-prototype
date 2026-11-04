@@ -2,7 +2,7 @@
 import { join } from 'node:path'
 import type { Ticket, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
-import type { Settings } from '../policy.ts'
+import type { Settings, Workspace } from '../policy.ts'
 import type { Localized, VariableSpec } from '../sources/kind.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 
@@ -16,6 +16,25 @@ export const EXECUTOR_VARIABLES: readonly (VariableSpec & { ticket?: true })[] =
 export interface Variable { key: string; value: string; description: Localized; owner: string }
 
 export const executionRoot = (settings: Settings, stateDir: string): string => settings.executor.directory || join(stateDir, 'work')
+
+/**
+ * The workspace a ticket belongs to: the one its Trigger recorded in `meta.workspace`, else the first configured one.
+ * A single workspace keeps the pre-workspace layout, so a migrated deployment runs in the same directories as before.
+ */
+export function workspaceOf(settings: Settings, ticket: Pick<Ticket, 'mandate'>): Workspace | undefined {
+  const id = ticket.mandate?.basis?.scope?.workspace
+  return settings.workspaces.find(workspace => workspace.id === id) ?? settings.workspaces[0]
+}
+
+/** Root directory of `workspace`: an explicit directory wins, else the executor root, per workspace when several exist. */
+export function workspaceRoot(settings: Settings, stateDir: string, workspace?: Workspace): string {
+  if (workspace?.directory) return workspace.directory
+  const root = executionRoot(settings, stateDir)
+  return workspace && settings.workspaces.length > 1 ? join(root, workspace.id) : root
+}
+
+/** The prepare command of `workspace`, falling back to the executor-wide one. */
+export const workspacePrepare = (settings: Settings, workspace?: Workspace): string => workspace?.prepare || settings.executor.prepare
 
 /** Lists all declared variables grouped by owner; `enabled` is false for Sources that are currently switched off. */
 export function declaredVariables(sources: SourceRegistry, settings?: Settings): { owner: string; enabled: boolean; variables: readonly VariableSpec[] }[] {
