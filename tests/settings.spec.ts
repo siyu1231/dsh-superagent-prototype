@@ -85,6 +85,17 @@ it('syncs a Policy part again after a failed sync, a minute later and then after
     expect(calls()).toBe(before + 2)
   } finally { vi.useRealTimers() }
 })
+it('resolves setup again when a Workspace binds another repository, because the Sources watch it', async () => {
+  h = await startRuntime()
+  const { settings, store } = h.runtime
+  const check = vi.spyOn(Setup.prototype, 'checkAccounts').mockResolvedValue(undefined)
+  const workspaces = [{ id: 'other', name: 'Other', directory: '', repository: 'acme/other', prepare: '', enabled: true }]
+  const saved = await settings.save('workspaces', workspaces, store.blockRevision('workspaces'), 'panel')
+  expect(check).toHaveBeenCalledWith('workspaces', expect.objectContaining({ workspaces }))
+  expect(saved).toMatchObject({ saved: true, restarting: true })
+  expect(store.settings().workspaces).toEqual(workspaces)
+})
+
 it('records nothing for a pause that changes nothing, refuses a sync while setup waits, and names an unknown block', async () => {
   h = await startRuntime()
   const { settings, store } = h.runtime

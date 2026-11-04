@@ -13,8 +13,11 @@ export interface SetupHost {
   restart(): void
 }
 
-const setupFields = (settings: Settings) =>
-  JSON.stringify(Object.entries(SETUP_FIELDS).map(([id, keys]) => keys.map(key => settings.sources[id]?.config[key] ?? '')))
+const setupFields = (settings: Settings) => JSON.stringify([
+  Object.entries(SETUP_FIELDS).map(([id, keys]) => keys.map(key => settings.sources[id]?.config[key] ?? '')),
+  // Which repositories the Sources watch comes from Workspace bindings too, so setup resolves them again when they move.
+  settings.workspaces.filter(workspace => workspace.enabled).map(workspace => [workspace.id, workspace.repository]),
+])
 export const setupChanged = (before: Settings, after: Settings): boolean => setupFields(before) !== setupFields(after)
 
 /**
