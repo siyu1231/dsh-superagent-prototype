@@ -1038,8 +1038,8 @@ describe('feishu event consumer', () => {
     controller.abort()
     await running
     vi.useRealTimers()
-    // Windows releases a closed SQLite file a moment later, so the removal is retried rather than failing the run.
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    // Windows releases a closed SQLite file a moment later, and a loaded machine makes that moment longer: retry for a while.
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   })
   /**
    * A bot CLI whose `event consume` behaves as `mode` says: `never` gets ready, `warn` warns once ready, `ready` stays up,
