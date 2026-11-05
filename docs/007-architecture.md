@@ -330,7 +330,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/context.ts` | The built-in prompt text, read from `prompts/`, and the transcript entries Sessions read |
 | `src/app/skill-files.ts` | Packaged text: `promptFile`, which joins a file's one-sentence lines into paragraphs, and the bundled skills |
 | `src/app/sessions.ts` | Sessions |
-| `src/app/workspaces.ts` | DSH's Workspace list as the one list of working directories: `workspaceEntries` for the panel, `adopt` to register a bound directory in DSH's list, and `retire` to drop a finished Ticket's own directory from it |
+| `src/app/workspaces.ts` | DSH's Workspace list as the one list of working directories: `workspaceEntries` for the panel, `included` to make every folder DSH lists a working directory, `adopt` to register a directory in DSH's list, and `retire` to drop a finished Ticket's own directory from it |
 | `src/app/delivery.ts` | `AgentDelivery`: delivers a message to a DeepSeek Harness agent once per request id, also across a restored Session |
 | `src/app/retry-health.ts` | `RetryHealth`: which Sessions wait on a model budget retry, for the `models` health entry |
 | `src/app/role-models.ts` | Resolves the Eval and Executor models, and seeds a new Session with its role's model |

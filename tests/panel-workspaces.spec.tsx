@@ -67,19 +67,3 @@ it('says that Tickets fall back to the Execution root while no Workspace exists'
   expect(text()).toContain('还没有工作目录')
   expect(all('.dt-section').some(section => section.querySelector('.dt-section-name')?.textContent === 'Web app')).toBe(false)
 })
-
-it('offers the Workspaces DSH already lists, and adds the chosen one as a bound Workspace', async () => {
-  await open()
-  // The bound Web app is not offered again; the directory DSH lists but no row binds is.
-  const offered = all('.dt-section').find(section => section.querySelector('.dt-section-name')?.textContent === zh.workspaceAvailable)
-  expect(offered?.textContent).toContain('/srv/docs')
-  expect(offered?.textContent).not.toContain('/srv/apps/web')
-  await click([...(offered?.querySelectorAll<HTMLElement>('button') ?? [])].find(button => button.textContent?.trim() === zh.workspaceBind)!)
-  expect(all('.dt-section-name').map(item => item.textContent)).toContain('Docs site')
-  await click(zh.save)
-  expect(server.settings.workspaces.map(item => [item.id, item.directory])).toEqual([
-    ['web', '/srv/apps/web'],
-    // The id a directory names keeps two Workspaces apart even when their titles are in another script.
-    ['docs', '/srv/docs'],
-  ])
-})

@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { adopt, retire, workspaceEntries, type WorkspaceRecord, type WorkspaceRegistry } from '../src/app/workspaces.ts'
+import { adopt, included, retire, workspaceEntries, workspaceId, type WorkspaceRecord, type WorkspaceRegistry } from '../src/app/workspaces.ts'
+import type { Workspace } from '../src/policy.ts'
 
 const made: string[] = []
 afterEach(() => { for (const path of made.splice(0)) rmSync(path, { recursive: true, force: true }) })
@@ -55,4 +56,28 @@ it('drops the entry of a finished Ticket directory, and leaves every other Works
   await retire(service, join(web, 'nowhere'))
   await retire(service, '')
   expect(deleted).toEqual(['w2'])
+})
+
+const workspace = (id: string, directory: string, repository = ''): Workspace =>
+  ({ id, name: id, directory, repository, prepare: '', enabled: true })
+
+it('adds every folder DSH lists to the working directories, and nothing twice', () => {
+  const web = directory('web'), docs = directory('docs'), work = directory('work')
+  const listed = [{ id: 'w1', path: web, title: 'Web app', sessions: 2 }, { id: 'w2', path: docs, title: '', sessions: 0 }]
+  // The configured Web app already names the first folder, however its path is spelled; the second names itself.
+  const added = included([workspace('web', `${web}${process.platform === 'win32' ? '\\' : '/'}`)], listed, () => false)!
+  expect(added).toHaveLength(2)
+  expect(added[0]).toEqual(workspace('web', `${web}${process.platform === 'win32' ? '\\' : '/'}`))
+  expect(added[1]).toMatchObject({ directory: docs, repository: '', prepare: '', enabled: true })
+  expect(added[1]!.name).toBe(docs.split(/[\\/]/).filter(Boolean).at(-1))
+  // A folder that is already a working directory, one a Ticket runs in, and an empty path add nothing.
+  expect(included([workspace('web', web)], [listed[0]!, { id: 'w3', path: work, title: 'Ticket', sessions: 1 },
+    { id: 'w4', path: '', title: 'Nowhere', sessions: 0 }], path => path === work)).toBeUndefined()
+})
+
+it('keeps the ids it derives apart, and accepts a name no slug can read', () => {
+  expect(workspaceId([{ id: 'web' }, { id: 'web-2' }], 'Web')).toBe('web-3')
+  // A name in another script leaves no letters to slug; the id still starts with one.
+  expect(workspaceId([], '工作目录')).toBe('workspace-default')
+  expect(workspaceId([{ id: 'workspace-default' }], '工作目录')).toBe('workspace-default-2')
 })

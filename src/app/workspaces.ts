@@ -5,6 +5,7 @@
  * name the same folder.
  */
 import { sameDirectory } from '../infra/environment.ts'
+import type { Workspace } from '../policy.ts'
 
 /** One Workspace as DSH stores it, narrowed to what dsh-superagent reads. */
 export interface WorkspaceRecord {
@@ -32,6 +33,35 @@ export interface WorkspaceEntry {
 /** Every Workspace DSH lists, in its own order, for the panel to offer as a directory a Ticket may run in. */
 export const workspaceEntries = (registry: WorkspaceRegistry): WorkspaceEntry[] =>
   registry.list().map(({ id, path, title, sessionIds }) => ({ id, path, title, sessions: sessionIds.length }))
+
+/** A short id the schema accepts, derived from a name; names in other scripts fall back to a numbered id. */
+export function workspaceId(workspaces: readonly { id: string }[], name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+  const base = /^[a-z]/.test(slug) ? slug : `workspace-${slug || 'default'}`
+  const taken = new Set(workspaces.map(workspace => workspace.id))
+  let id = base
+  for (let suffix = 2; taken.has(id); suffix += 1) id = `${base}-${suffix}`
+  return id
+}
+
+/**
+ * The configured working directories plus every folder DSH already lists, so the sidebar and the panel name the same
+ * directories and a folder someone works in is a working directory without a second step. `skip` leaves out the roots a
+ * Ticket runs in, which come and go with their Ticket. Returns `undefined` when there is nothing to add.
+ */
+export function included(workspaces: readonly Workspace[], entries: readonly WorkspaceEntry[],
+  skip: (path: string) => boolean): Workspace[] | undefined {
+  const all = [...workspaces]
+  let added = false
+  for (const entry of entries) {
+    if (!entry.path || skip(entry.path)) continue
+    if (all.some(row => row.directory !== '' && sameDirectory(row.directory, entry.path))) continue
+    const name = entry.title.trim() || entry.path.split(/[\\/]/).filter(Boolean).at(-1) || entry.path
+    all.push({ id: workspaceId(all, name), name, directory: entry.path, repository: '', prepare: '', enabled: true })
+    added = true
+  }
+  return added ? all : undefined
+}
 
 /**
  * Registers `directory` in DSH's Workspace list when no Workspace holds it yet, so a directory bound in the panel shows

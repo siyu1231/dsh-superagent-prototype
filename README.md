@@ -36,7 +36,7 @@ Read the numbered documents in order; each builds only on the ones before it.
 
 A Workspace is the unit that decides where work happens and which repository its work items come from. The settings page under **Execution → Workspaces** lists them: each entry has a name, a directory, an optional repository, an optional prepare command and an enabled switch. A directory left empty runs under the Execution root, and one repository may be bound to one Workspace only.
 
-The list is not a second list of folders. DSH already keeps one Workspace per directory a Session runs in, and the panel offers those directories for you to bind; a directory you bind here is registered in DSH's Workspace list too, so it shows up in the sidebar beside the folders you work in. A work item's own directory is listed there only while the work item is open, and its entry is dropped when it ends — the directory and its Session logs stay.
+The list is not a second list of folders. DSH already keeps one Workspace per directory a Session runs in, and every one of those folders is a working directory here: the panel keeps the two lists in step at start, so a folder you work in needs no second step. A directory added here is registered in DSH's Workspace list too, so it shows up in the sidebar beside the folders you work in. A work item's own directory is listed there only while the work item is open, and its entry is dropped when it ends — the directory and its Session logs stay.
 
 Existing installations upgrade in place: the repository from the GitHub Source becomes the first Workspace, named after the repository.
 

@@ -11,14 +11,14 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
-import { allowedSender, policyVersion, settingsPolicy, type Workspace } from '../policy.ts'
+import { allowedSender, policyVersion, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
-import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
+import { environmentOf, executionRoot, ticketEnvironment, type Variable } from './execution-environment.ts'
 import type { SetupProblem } from '../setup.ts'
 import { DshExecutor, sourceTrigger, triggerMessage, workerSessionId } from '../executor/dsh.ts'
 import { ticketCard } from './cards.ts'
@@ -41,7 +41,7 @@ import { Setup } from './setup.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
-import { retire } from './workspaces.ts'
+import { included, retire, workspaceEntries, workspaceId, type WorkspaceRegistry } from './workspaces.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
@@ -105,6 +105,7 @@ export class Runtime extends Service implements SourceHost {
       const report = (error: unknown) => { ctx.logger.warn('dsh-superagent: %s', String(error)) }
       const store = opened = this.store = new Store(join(machine.stateDir, 'orchestrator.sqlite'), report)
       migrateWorkspaces(store)
+      includeWorkspaces(store, ctx.workspaceRegistry, machine)
       const setup = this.setup = new Setup({ context: ctx, machine, lifetime: this.lifetime, restart })
       const deployed = () => setup.configured()
         ? environmentOf({ deployment: setup.deployment, sources: this.sources, settings: store.settings() }) : undefined
@@ -305,19 +306,31 @@ export function migrateWorkspaces(store: Pick<Store, 'blockRevision' | 'settings
   const name = repository.split('/').at(-1) ?? repository
   const bound = settings.workspaces.some(workspace => workspace.repository.toLowerCase() === repository.toLowerCase())
   const workspaces = bound ? settings.workspaces : [...settings.workspaces,
-    { id: freshWorkspaceId(settings.workspaces, name), name, directory: '', repository, prepare: '', enabled: true }]
+    { id: workspaceId(settings.workspaces, name), name, directory: '', repository, prepare: '', enabled: true }]
   const github = settings.sources.github
   const sources = github ? { ...settings.sources, github: { ...github, config: { ...github.config, repository: '' } } } : settings.sources
   store.saveSettings({ ...settings, workspaces, sources },
     { source: 'internal', block: 'workspaces', policyVersion: policyVersion(settings), policyChanged: false, notified: [] })
 }
 
-/** An id no workspace holds yet, derived from the repository's name. */
-function freshWorkspaceId(workspaces: readonly Workspace[], name: string): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-  const base = /^[a-z]/.test(slug) ? slug : `workspace-${slug || 'default'}`
-  const taken = new Set(workspaces.map(workspace => workspace.id))
-  let id = base
-  for (let suffix = 2; taken.has(id); suffix += 1) id = `${base}-${suffix}`
-  return id
+/**
+ * Adds every folder DSH already lists to the working directories, so a folder someone works in is one already and the
+ * panel shows the same folders as DSH's sidebar. The roots Tickets run in are left out: each comes and goes with its own
+ * Ticket. Runs at every start, and does nothing while DSH lists no new folder.
+ */
+export function includeWorkspaces(store: Pick<Store, 'settings' | 'saveSettings'>, registry: WorkspaceRegistry,
+  machine: Pick<Machine, 'stateDir'>): void {
+  const settings = store.settings()
+  const root = executionRoot(settings, machine.stateDir)
+  const workspaces = included(settings.workspaces, workspaceEntries(registry), path => within(root, path))
+  if (!workspaces) return
+  store.saveSettings({ ...settings, workspaces },
+    { source: 'internal', block: 'workspaces', policyVersion: policyVersion(settings), policyChanged: false, notified: [] })
+}
+
+/** True when `path` is `parent` itself or a directory below it. */
+function within(parent: string, path: string): boolean {
+  if (!parent) return false
+  const rest = relative(parent, path)
+  return rest === '' || (!rest.startsWith('..') && !isAbsolute(rest))
 }
