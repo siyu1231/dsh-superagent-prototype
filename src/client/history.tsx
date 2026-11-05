@@ -2,6 +2,9 @@
  * One Ticket's conversation, in a tab of its own: the requests, what the worker said, and the tools it ran. The words
  * come from the Session's own log, because DSH refuses to show another Session's conversation through its chat tab
  * unless that Session is a subagent of the one asking.
+ *
+ * It reads the way the Session itself reads: one collapsed row per turn, with the closing answer under it, and the
+ * steps the worker took behind the row when someone asks for them.
  */
 import { useEffect, useRef, useState } from 'react'
 import { caller, type SessionHistory } from './api.ts'
@@ -25,6 +28,60 @@ export function historyTarget(address: string): { session: string; title: string
   return { session: decodeURIComponent(session), title: new URLSearchParams(query).get('title') ?? '' }
 }
 
+type Entry = SessionHistory['entries'][number]
+
+/** Splits a log into turns: each request the worker was given opens the next one. */
+export function turns(entries: readonly Entry[]): Entry[][] {
+  const groups: Entry[][] = []
+  for (const entry of entries) {
+    const current = groups.at(-1)
+    const opens = entry.kind === 'asked' && current !== undefined && current.some(item => item.kind !== 'asked')
+    if (!current || opens) groups.push([entry])
+    else current.push(entry)
+  }
+  return groups
+}
+
+/** One step of a turn: the tool it ran, what it thought, or what it said. */
+function Step({ entry, t }: { entry: Entry; t: T }) {
+  if (entry.kind === 'tool') {
+    return <details className="dt-history-call">
+      <summary><Icon name="session" size={13} /><span className="dt-mono dt-history-name">{entry.tool?.name}</span>
+        <span className="dt-history-args">{hint(entry.tool?.arguments)}</span></summary>
+      {entry.tool?.result !== undefined && <pre className="dt-history-result">{entry.tool.result}</pre>}
+    </details>
+  }
+  if (entry.kind === 'thought') {
+    return <details className="dt-history-thought">
+      <summary>{t('historyThought')}</summary>
+      <div className="dt-history-bubble"><MarkdownLite text={entry.text} /></div>
+    </details>
+  }
+  return <div className="dt-history-bubble"><MarkdownLite text={entry.text} /></div>
+}
+
+/** One turn: folded down to the closing answer, with its steps one click away. */
+function Turn({ turn, t }: { turn: readonly Entry[]; t: T }) {
+  const [open, setOpen] = useState(false)
+  const first = turn[0]
+  const last = turn[turn.length - 1]
+  const seconds = first && last ? Math.max(0, Math.round((Date.parse(last.at) - Date.parse(first.at)) / 1000)) : 0
+  const closing = [...turn].reverse().find(entry => entry.kind === 'said')
+  return <section className={`dt-history-turn${open ? ' dt-history-turn-open' : ''}`}>
+    <button type="button" className="dt-history-turn-head" aria-expanded={open} onClick={() => { setOpen(value => !value) }}>
+      <span className="dt-history-turn-mark" aria-hidden="true" />{t('historyDone', { seconds })}
+    </button>
+    {open
+      ? <ol className="dt-history-list">{turn.map((entry, index) => <li key={`${index}-${entry.at}`}
+        className={`dt-history-entry dt-history-${entry.kind}`}>
+        <Step entry={entry} t={t} />
+      </li>)}</ol>
+      : closing
+        ? <div className="dt-history-bubble"><MarkdownLite text={closing.text} /></div>
+        : <p className="dt-history-quiet">{t('historyQuiet')}</p>}
+  </section>
+}
+
 function Body({ session }: { session: string }) {
   const { t } = usePanel()
   const [state, setState] = useState<{ data?: SessionHistory; error?: Error }>({})
@@ -37,28 +94,17 @@ function Body({ session }: { session: string }) {
     return () => { live = false }
   }, [session])
   const entries = state.data?.entries ?? []
-  const end = useRef<HTMLLIElement>(null)
+  const groups = turns(entries)
+  const end = useRef<HTMLDivElement>(null)
   // A conversation is read from its newest end, as the Session it came from would open.
-  useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }) }, [entries.length])
+  useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }) }, [groups.length])
   return <>
     {!state.data && !state.error && <Hint>{t('loading')}</Hint>}
     {state.error && <p className="dt-error" role="alert">{state.error.message}</p>}
     {state.data && entries.length === 0 && <Hint>{t('historyLogEmpty')}</Hint>}
-    <ol className="dt-history-list">{entries.map((entry, index) => <li key={`${index}-${entry.at}`} ref={index === entries.length - 1 ? end : undefined}
-      className={`dt-history-entry dt-history-${entry.kind}`}>
-      {entry.kind === 'tool'
-        ? <details className="dt-history-call">
-          <summary><Icon name="session" size={13} /><span className="dt-mono dt-history-name">{entry.tool?.name}</span>
-            <span className="dt-history-args">{hint(entry.tool?.arguments)}</span></summary>
-          {entry.tool?.result !== undefined && <pre className="dt-history-result">{entry.tool.result}</pre>}
-        </details>
-        : entry.kind === 'thought'
-          ? <details className="dt-history-thought">
-            <summary>{t('historyThought')}</summary>
-            <div className="dt-history-bubble"><MarkdownLite text={entry.text} /></div>
-          </details>
-          : <div className="dt-history-bubble"><MarkdownLite text={entry.text} /></div>}
-    </li>)}</ol>
+    <div className="dt-history-turns" ref={end}>
+      {groups.map((group, index) => <Turn key={`${index}-${group.at(0)?.at ?? ''}`} turn={group} t={t} />)}
+    </div>
   </>
 }
 
