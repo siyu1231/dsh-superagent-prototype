@@ -12,6 +12,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'session'
       owner: Record<string, never>
     }
+    'sidebar.right.pane.tab': {
+      kind: 'keyed'
+      scope: 'session'
+      owner: Record<string, never>
+    }
   }
 }
 
