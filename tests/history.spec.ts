@@ -62,6 +62,12 @@ it('leaves out a tool result for a call it never saw, and keeps the result out w
     tool: { name: 'read', arguments: '{"path":"a"}' } }])
 })
 
+it('leaves out the host bookkeeping a worker is sent around its request', () => {
+  const dir = home('worker-t1', [asked('**Fix the typo**'), asked('Current runtime context. This snapshot supersedes earlier ones.'),
+    asked('<system-reminder>\nA skill is a reusable set of task-specific instructions.'), asked('Now open a pull request.')])
+  expect(historyView('worker-t1', dir)?.entries.map(entry => entry.text)).toEqual(['**Fix the typo**', 'Now open a pull request.'])
+})
+
 it('answers nothing for a Session whose log is not on disk', () => {
   expect(historyView('worker-t1', home('worker-other', [asked('hi')]))).toBeUndefined()
 })

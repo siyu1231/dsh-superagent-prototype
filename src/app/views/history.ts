@@ -79,6 +79,14 @@ function textOf(content: unknown): string {
   }
   return parts.join('\n').trim()
 }
+/** The bookkeeping a worker's host writes into its inbox: runtime snapshots, skill reminders and clocks, not what a person asked. */
+const SCAFFOLD = /^(\[Compressed conversation section|Current runtime context|Current working directory|Time sampled while preparing|Browser time zone|A skill is a reusable set|<system-reminder>|<acp |Current DSH file policy|Approval prompts are disabled)/
+
+/** True for the messages the host adds around a request, which read as noise in a transcript. */
+function scaffold(text: string): boolean {
+  return SCAFFOLD.test(text)
+}
+
 /** The first message of a worker is the Ticket envelope as JSON; its title and assignment read better than the JSON. */
 function askedOf(text: string): string {
   if (!text.startsWith('{')) return text
@@ -112,7 +120,7 @@ export function historyView(session: string, home = dshHome()): SessionHistoryVi
     const at = typeof event.time === 'number' ? new Date(event.time).toISOString() : ''
     if (event.type === 'user/message') {
       const text = textOf(data.content)
-      if (text.length > 0) entries.push({ kind: 'asked', at, text: clip(askedOf(text), TEXT) })
+      if (text.length > 0 && !scaffold(text)) entries.push({ kind: 'asked', at, text: clip(askedOf(text), TEXT) })
     } else if (event.type === 'assistant/message') {
       const message = data.message as { content?: unknown } | undefined
       const text = textOf(message?.content)
