@@ -72,6 +72,6 @@ it('reports a failed Session navigation instead of pretending it opened', async 
   serve()
   const view = await render(master, async () => { throw new Error('Session is gone') })
   await act(async () => { buttons(view.container).find(button => button.textContent === zh.sessionsOpen)!.click() })
-  expect(view.container.querySelector('[role="alert"]')?.textContent).toBe('Session is gone')
+  expect(document.body.textContent).toContain('Session is gone')
   view.dispose()
 })

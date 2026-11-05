@@ -120,6 +120,8 @@ const TEXT = {
   sessionsEmpty: ['还没有工单执行过。', 'No Ticket has run yet.'],
   sessionsOpen: ['打开', 'Open'],
   sessionsEnded: ['已结束', 'Ended'],
+  trackedRunning: ['进行中', 'Running'],
+  trackedFinished: ['已完成', 'Finished'],
   trackedTasks: ['本会话接的单都列在这里，点「打开」看它自己的执行会话。',
     'Every Ticket this Session took is listed here; Open shows the executor Session that ran it.'],
   trackedOne: ['这是本工单的执行会话。它的触发和决定在主会话里。',

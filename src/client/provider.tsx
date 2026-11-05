@@ -71,6 +71,24 @@ function Toast({ text, onDone, holdMs = 3000 }: { text: string; onDone: () => vo
 }
 const stay = () => {}
 const noSession = async () => {}
+/**
+ * What a view outside the panel needs to render with the panel's own components: the stylesheet, the translator, the
+ * API caller and Session opening. It polls nothing, so a Conversation view does not keep asking for the panel's state.
+ */
+export function PanelScope({ t, openSession = noSession, children }: {
+  t: T; openSession?: (sessionId: string) => Promise<void>; children: ReactNode
+}) {
+  const call = useMemo(() => caller(() => messages(t)), [t])
+  const [toast, setToast] = useState<{ text: string; id: number }>()
+  const notify = useCallback((text: string) => setToast({ text, id: Date.now() }), [])
+  const context = useMemo(() => ({ t, call, navigate: stay, back: stay, backLabel: '', openSession, notify, restart: stay }),
+    [t, call, openSession, notify])
+  return <Panel.Provider value={context}>
+    <style>{STYLES}</style>
+    {children}
+    {toast && <Toast key={toast.id} text={toast.text} onDone={() => setToast(undefined)} />}
+  </Panel.Provider>
+}
 export function PanelProvider({ t, interval = 5000, openSession = noSession, navigate = stay, back = stay, backLabel = '', children }: {
   t: T; interval?: number; openSession?: (sessionId: string) => Promise<void>; navigate?: PanelContext['navigate']; back?: () => void
   backLabel?: string
