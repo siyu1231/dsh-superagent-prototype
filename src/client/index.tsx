@@ -15,6 +15,7 @@ import { App } from './app.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
 import { TrackedPanel } from './tracked.tsx'
+import { HistoryBody, HISTORY_ADDRESS, historyAddress, historyTarget } from './history.tsx'
 import type { T } from './text.ts'
 
 type ClientContext = Context & { sessions: ISessions }
@@ -23,9 +24,8 @@ const PANEL_ID = 'dsh-superagent' as MainPanelId
 const ENTRY = 'dsh-superagent'
 /** The right column's tab type for the tracked list: its id is also the slot key its body registers under. */
 const TRACKED = 'dsh-superagent-tracked'
-/** The Host's own chat tab, which shows one Session's conversation; its address form is what reaches it. */
-const CHAT_KIND = 'subagentchat'
-const CHAT_ADDRESS = 'dsh-resource://subagentchat/session/'
+/** The tab type that reads one Ticket's conversation from its Session log. */
+const HISTORY = 'dsh-superagent-history'
 
 /** A tab type of the Host's right column, which this plugin does not depend on. */
 interface TrackedTabs {
@@ -34,6 +34,9 @@ interface TrackedTabs {
     kind: string
     priority: 'extension' | 'builtin' | 'fallback'
     title: (address: string) => string
+    multiple?: boolean
+    patterns?: string[]
+    canOpen?: (address: string) => boolean
     guide?: {
       id: string
       order: number
@@ -98,15 +101,13 @@ export function apply(ctx: ClientContext): void {
     }
   }
   /**
-   * Shows one Session's conversation in a tab of the right column, the way the Host shows a subagent's. The address
-   * form is what makes the Host adopt a Session it did not start as a subagent; `mode: unknown` keeps it read-only,
-   * because a Ticket's Session is a record once it ended.
+   * Shows one Ticket's conversation in a tab of its own, read from the Session log. The Host's own chat tab cannot be
+   * used for this: it refuses any Session that is not a subagent of the one asking (`subagent/unauthorized`).
    */
-  const chat = (hostSession: string, session: string): void => {
+  const chat = (session: string, title: string): void => {
     const right = host.get('sidebarRight') as TrackedSidebar | undefined
     if (!right) throw new Error(t('trackedChatUnavailable'))
-    const query = new URLSearchParams({ parent: hostSession, mode: 'unknown' })
-    right.openResource(`${CHAT_ADDRESS}${encodeURIComponent(session)}?${query.toString()}`, { kind: CHAT_KIND })
+    right.openResource(historyAddress(session, title), { kind: HISTORY })
   }
   ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS, inject: () => ({}) },
     (props: { t: T }) => <Mounted ctx={ctx} t={props.t} />))
@@ -117,12 +118,21 @@ export function apply(ctx: ClientContext): void {
       id: TRACKED, kind: TRACKED, priority: 'extension', title: () => t('viewTracked'),
       guide: [{ id: 'tracked', order: 30, title: () => t('viewTracked'), description: () => t('trackedGuide'), icon: TrackedArtwork }],
     }), 'dsh-superagent: 跟踪 tab type')
+    // One tab per Ticket's conversation: the address names the Session, so every Ticket gets its own.
+    scope.effect(() => scope.sidebarRightTabs.register({
+      id: HISTORY, kind: HISTORY, priority: 'extension', multiple: true,
+      patterns: [`${HISTORY_ADDRESS}**`],
+      canOpen: (address: string) => historyTarget(address) !== undefined,
+      title: (address: string) => historyTarget(address)?.title || t('historyTitle'),
+    }), 'dsh-superagent: 跟踪 conversation tab type')
   })
   ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
     name: 'sidebar.right.pane.tab', key: TRACKED, locale: NS,
-    inject: (sessionId: string) => ({ session: sessionId, open, chat: (session: string) => { chat(sessionId, session) } }),
-  }, (props: { session: string; t: T; open: (session: string) => Promise<void>; chat: (session: string) => void }) =>
+    inject: (sessionId: string) => ({ session: sessionId, open, chat: (session: string, title: string) => { chat(session, title) } }),
+  }, (props: { session: string; t: T; open: (session: string) => Promise<void>; chat: (session: string, title: string) => void }) =>
     <TrackedPanel sessionId={props.session} t={props.t} open={props.open} chat={props.chat} />))
+  ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: HISTORY, locale: NS,
+    inject: () => ({ open }) }, HistoryBody))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))
 }

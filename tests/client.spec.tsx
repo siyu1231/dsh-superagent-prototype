@@ -15,7 +15,7 @@ const t = ((key: keyof typeof zh) => zh[key] ?? key) as never
 function fixture(listed: string[]) {
   const entries: Entry[] = []
   const dictionaries: Record<string, unknown> = {}
-  const tabs: { id?: string; kind?: string; title?: () => string; guide?: { order: number; title: () => string; description?: () => string }[] }[] = []
+  const tabs: { id?: string; kind?: string; title?: (address: string) => string; multiple?: boolean; patterns?: string[]; canOpen?: (address: string) => boolean; guide?: { order: number; title: () => string; description?: () => string }[] }[] = []
   const ctx = {
     slots: { inject: (_name: string, register: () => void) => register(), register: (options: Entry['options'], component: Entry['component']) => { entries.push({ options, component }); return () => {} } },
     locale: { register: (ns: string, value: unknown) => { dictionaries[ns] = value; return () => {} }, bind: () => t },
@@ -26,7 +26,7 @@ function fixture(listed: string[]) {
     inject: (_deps: string[], callback: (scope: unknown) => void) => {
       callback({
         effect: (effect: () => unknown) => { effect() },
-        sidebarRightTabs: { register: (definition: { id: string; kind: string; title: () => string; guide?: { order: number; title: () => string; description?: () => string }[] }) => { tabs.push(definition); return () => {} } },      })
+        sidebarRightTabs: { register: (definition: { id: string; kind: string; title: (address: string) => string; multiple?: boolean; patterns?: string[]; canOpen?: (address: string) => boolean; guide?: { order: number; title: () => string; description?: () => string }[] }) => { tabs.push(definition); return () => {} } },      })
     },
     // Omit config form service so Deployment renders read-only.
     get: () => undefined,
@@ -58,16 +58,22 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 it('registers a localized main panel, sidebar entry, right column tab and Plugin Manager row page, and no settings section', () => {
   const { entries, dictionaries, tabs, main, nav } = fixture([])
-  expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'sidebar.right.pane.tab', 'plugins.row.config'])
-  expect(entries[3]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
+  expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'sidebar.right.pane.tab', 'sidebar.right.pane.tab', 'plugins.row.config'])
+  expect(entries[4]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
   expect(entries[2]!.options).toMatchObject({ key: 'dsh-superagent-tracked', locale: 'dshSuperagent' })
-  expect(tabs).toHaveLength(1)
+  expect(entries[3]!.options).toMatchObject({ key: 'dsh-superagent-history', locale: 'dshSuperagent' })
+  expect(tabs).toHaveLength(2)
   expect(tabs[0]).toMatchObject({ id: 'dsh-superagent-tracked', kind: 'dsh-superagent-tracked' })
-  expect(tabs[0]!.title?.()).toBe(zh.viewTracked)
+  expect(tabs[0]!.title?.('')).toBe(zh.viewTracked)
   // The tab shows up in the right column's new-tab page, beside 工作区文件 and 新建终端.
   expect(tabs[0]!.guide).toEqual([expect.objectContaining({ order: 30 })])
   expect(tabs[0]!.guide![0]!.title()).toBe(zh.viewTracked)
   expect(tabs[0]!.guide![0]!.description?.()).toBe(zh.trackedGuide)
+  // One conversation tab per Ticket carries its own address, so each Ticket gets its own tab.
+  expect(tabs[1]).toMatchObject({ id: 'dsh-superagent-history', kind: 'dsh-superagent-history', multiple: true })
+  expect(tabs[1]!.canOpen?.('dsh-resource://dsh-superagent/history/worker-t1?title=Fix')).toBe(true)
+  expect(tabs[1]!.canOpen?.('dsh-resource://subagentchat/session/x?parent=y&mode=unknown')).toBe(false)
+  expect(tabs[1]!.title?.('dsh-resource://dsh-superagent/history/worker-t1?title=Fix+the+typo')).toBe('Fix the typo')
   expect(Object.keys(dictionaries)).toEqual(['dshSuperagent'])
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })

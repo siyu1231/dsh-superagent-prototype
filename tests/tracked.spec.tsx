@@ -54,7 +54,7 @@ it('opens a Ticket\'s conversation in its own tab when its card is picked, and n
   const chat = vi.fn()
   const view = await panel(master, open, chat)
   await act(async () => { entry(view.container, 'Add a Contributing section').click() })
-  expect(chat).toHaveBeenCalledExactlyOnceWith('worker-t2')
+  expect(chat).toHaveBeenCalledExactlyOnceWith('worker-t2', 'Add a Contributing section')
   expect(open).not.toHaveBeenCalled()
   view.dispose()
 })

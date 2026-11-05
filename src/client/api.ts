@@ -139,4 +139,6 @@ export type PromptConfig = PromptsView['defaults']
 export type ThreadFacts = TicketRow['threads'][number]
 export type SessionListView = ApiResponse<'GET sessions'>
 export type SessionRow = SessionListView['sessions'][number]
+export type SessionHistory = ApiResponse<'GET sessions/:session/history'>
+export type SessionHistoryEntry = SessionHistory['entries'][number]
 export type Actor = TriggerRow['actor']

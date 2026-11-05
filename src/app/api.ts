@@ -9,6 +9,7 @@ import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketListView } from './views/tickets.ts'
 import type { SessionListView } from './views/sessions.ts'
+import type { SessionHistoryView } from './views/history.ts'
 import type { WorkspaceEntry } from './workspaces.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
@@ -27,6 +28,7 @@ export interface Api {
   'GET settings': { response: SettingsView }
   'GET workspaces': { response: { workspaces: WorkspaceEntry[] } }
   'GET sessions': { response: SessionListView }
+  'GET sessions/:session/history': { response: SessionHistoryView }
   'POST sources/:id/labels': { response: { added: string[] } }
   'GET threads': { query?: Paged & { filter?: ThreadFilter }; response: ThreadListView }
   'GET threads/:key': { query?: { limit?: number; before?: string; around?: string }; response: ThreadDetailView }

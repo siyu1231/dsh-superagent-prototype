@@ -28,14 +28,14 @@ function whereOf(row: Row): string {
 }
 
 /** One Ticket as a card: what it is, how it went, and where it ran. */
-function Card({ row, chat }: { row: Row; chat: (session: string) => void }) {
+function Card({ row, chat }: { row: Row; chat: (session: string, title: string) => void }) {
   const { t, openSession, notify } = usePanel()
   const mark = markOf(row)
   const where = whereOf(row)
   const pull = row.pull
   return <li className="dt-tracked-item">
     <button type="button" className="dt-tracked-entry" title={t('trackedChat')}
-      onClick={() => { try { chat(row.session) } catch (failure) { notify(errorText(failure)) } }}>
+      onClick={() => { try { chat(row.session, row.title) } catch (failure) { notify(errorText(failure)) } }}>
       <span className="dt-tracked-entry-title">{row.title}</span>
       <span className="dt-tracked-entry-meta">
         <StageMark state={mark.state} icon={mark.icon} label={stateOf(t, row)} />
@@ -51,7 +51,7 @@ function Card({ row, chat }: { row: Row; chat: (session: string) => void }) {
   </li>
 }
 
-function Group({ title, rows, chat }: { title: string; rows: readonly Row[]; chat: (session: string) => void }) {
+function Group({ title, rows, chat }: { title: string; rows: readonly Row[]; chat: (session: string, title: string) => void }) {
   return <>
     <p className="dt-tracked-heading">{title}<span className="dt-count">{rows.length}</span></p>
     <ul className="dt-tracked-list">{rows.map(row => <Card key={row.session} row={row} chat={chat} />)}</ul>
@@ -59,7 +59,7 @@ function Group({ title, rows, chat }: { title: string; rows: readonly Row[]; cha
 }
 
 /** The Tickets one Session tracks, as cards; each opens its own conversation in a tab beside this one. */
-function Body({ sessionId, chat }: { sessionId: string; chat: (session: string) => void }) {
+function Body({ sessionId, chat }: { sessionId: string; chat: (session: string, title: string) => void }) {
   const { t } = usePanel()
   const listed = usePoll(() => caller(() => quiet)('GET sessions'), [])
   const rows = listed.data?.sessions ?? []
@@ -88,7 +88,7 @@ export function TrackedPanel({ sessionId, t, open, chat }: {
   /** Shows a Session; rejects with a message in the interface language. */
   open: (session: string) => Promise<void>
   /** Opens one Session's conversation in a tab of its own beside this one. */
-  chat: (session: string) => void
+  chat: (session: string, title: string) => void
   t: T
 }) {
   return <PanelScope t={t} openSession={open}><Body sessionId={sessionId} chat={chat} /></PanelScope>

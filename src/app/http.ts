@@ -28,6 +28,7 @@ import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
 import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
 import { sessionList } from './views/sessions.ts'
+import { historyView } from './views/history.ts'
 import { adopt, workspaceEntries, type WorkspaceRegistry } from './workspaces.ts'
 
 export interface HttpHost {
@@ -176,6 +177,11 @@ function routes(runtime: HttpHost): Routes {
     'GET settings': () => settingsView(store, runtime.sources, runtime.health, setupState(runtime), runtime.machine.stateDir),
     'GET workspaces': () => ({ workspaces: workspaceEntries(runtime.workspaces) }),
     'GET sessions': () => sessionList(store, runtime.masterId),
+    'GET sessions/:session/history': ({ params }) => {
+      const history = historyView(params.session)
+      if (!history) throw new RouteError(404, `No log is kept for Session ${params.session}`)
+      return history
+    },
     'POST sources/:id/labels': ({ params }) => runtime.settings.refreshLabels(params.id),
     'GET threads': ({ query }) => {
       const { filter, offset, limit } = ThreadsQuery.parse(query)

@@ -8,7 +8,7 @@ import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-
 import type { Api, ApiResponse, RouteParams } from '../../src/app/api.ts'
 import { SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInPart, builtInParts, composePrompt, composeSkill, defaultPrompts,
   environmentSection, policySection, promptParts } from '../../src/app/prompts.ts'
-import type { DroppedReply, HistoryView, Problem, PromptsView, SessionRow, SetupView, SourceStatusRow, SourceView, StateView, ThreadPageView,
+import type { DroppedReply, HistoryView, Problem, PromptsView, SessionHistoryEntry, SessionRow, SetupView, SourceStatusRow, SourceView, StateView, ThreadPageView,
   ThreadRow, TicketPageView,
   TicketRow, TicketStage,
   TriggerRow } from '../../src/client/api.ts'
@@ -93,6 +93,8 @@ export interface PanelServer {
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
   /** Sessions the router tracks, as `GET sessions` reports them. */
   sessions: SessionRow[]
+  /** One Ticket's conversation, as `GET sessions/:session/history` reports it. */
+  sessionLog: SessionHistoryEntry[]
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
@@ -269,6 +271,11 @@ function initial(): PanelServer {
     sessions: [{ ticket: 't1', session: 'worker-t1', title: 'Fix the README typo', workspace: 'web', directory: '/srv/work/web/fix-the-readme-typo',
       stage: 'working', action: 'working', live: true, at: '2026-01-01T00:00:00.000Z', createdAt: '2025-12-31T00:00:00.000Z',
       sender: 'alice', pull: { thread: 'github:12', number: 12, url: 'https://github.com/acme/web/pull/12' } }],
+    sessionLog: [
+      { kind: 'asked', at: '2025-12-31T00:00:00.000Z', text: '**Fix the README typo**\n\nCorrect "recieve" to "receive".' },
+      { kind: 'tool', at: '2025-12-31T00:00:01.000Z', text: '', tool: { name: 'pwsh', arguments: '{"command":"git status"}', result: 'nothing to commit' } },
+      { kind: 'said', at: '2025-12-31T00:00:02.000Z', text: 'Fixed it and opened **PR #12**.' },
+    ],
     threads: [threadSummary()], threadPages: threadPage,
     person: [ticketSummary({ attention: { id: 'q1', question: '需要确认按钮颜色' }, note: { text: '需要确认按钮颜色', error: false }, reply },
       { stage: 'person', action: 'answer' }),
@@ -314,6 +321,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET settings': { answer: settingsView },
   'GET workspaces': { answer: () => ({ workspaces: server.workspaces }) },
   'GET sessions': { answer: () => ({ master: 'orchestrator-test', sessions: server.sessions }) },
+  'GET sessions/:session/history': { answer: request => ({ session: request.params.session, entries: server.sessionLog }) },
   'POST sources/:id/labels': { answer: () => {
     // Label refresh failures come from the bot CLI and are returned verbatim.
     if (server.joinError) return refuse(500, server.joinError)
