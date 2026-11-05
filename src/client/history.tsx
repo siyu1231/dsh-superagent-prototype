@@ -3,12 +3,12 @@
  * come from the Session's own log, because DSH refuses to show another Session's conversation through its chat tab
  * unless that Session is a subagent of the one asking.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { caller, type SessionHistory } from './api.ts'
 import { Icon } from './controls.tsx'
 import { PanelScope, usePanel } from './provider.tsx'
 import { errorText, type T } from './text.ts'
-import { Hint, MarkdownLite, SessionButton } from './widgets.tsx'
+import { Hint, MarkdownLite } from './widgets.tsx'
 
 const quiet = { offline: 'offline', notRunning: 'not running', serverError: (status: number) => `error ${status}`,
   requestFailed: (status: number) => `error ${status}`, setup: () => 'setup', user: (failure: { code: string }) => failure.code }
@@ -37,24 +37,38 @@ function Body({ session }: { session: string }) {
     return () => { live = false }
   }, [session])
   const entries = state.data?.entries ?? []
+  const end = useRef<HTMLLIElement>(null)
+  // A conversation is read from its newest end, as the Session it came from would open.
+  useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }) }, [entries.length])
   return <>
     {!state.data && !state.error && <Hint>{t('loading')}</Hint>}
     {state.error && <p className="dt-error" role="alert">{state.error.message}</p>}
     {state.data && entries.length === 0 && <Hint>{t('historyLogEmpty')}</Hint>}
-    <ol className="dt-history-list">{entries.map((entry, index) => <li key={`${index}-${entry.at}`}
-      className={entry.kind === 'tool' ? 'dt-history-entry dt-history-tool' : `dt-history-entry dt-history-${entry.kind}`}>
+    <ol className="dt-history-list">{entries.map((entry, index) => <li key={`${index}-${entry.at}`} ref={index === entries.length - 1 ? end : undefined}
+      className={`dt-history-entry dt-history-${entry.kind}`}>
       {entry.kind === 'tool'
         ? <details className="dt-history-call">
           <summary><Icon name="session" size={13} /><span className="dt-mono dt-history-name">{entry.tool?.name}</span>
             <span className="dt-history-args">{entry.tool?.arguments}</span></summary>
           {entry.tool?.result !== undefined && <pre className="dt-history-result">{entry.tool.result}</pre>}
         </details>
-        : <>
-          <span className="dt-history-who">{t(entry.kind === 'asked' ? 'historyAsked' : 'historySaid')}</span>
-          <div className="dt-history-bubble"><MarkdownLite text={entry.text} /></div>
-        </>}
+        : entry.kind === 'thought'
+          ? <details className="dt-history-thought">
+            <summary>{t('historyThought')}</summary>
+            <div className="dt-history-bubble"><MarkdownLite text={entry.text} /></div>
+          </details>
+          : <div className="dt-history-bubble"><MarkdownLite text={entry.text} /></div>}
     </li>)}</ol>
   </>
+}
+
+/** The way out of a read-only spread: one full-width button at the foot of the tab, as a conversation's own bar. */
+function OpenBar({ session, label }: { session: string; label: string }) {
+  const { openSession, notify } = usePanel()
+  return <button type="button" className="dt-history-open"
+    onClick={() => { openSession(session).catch(error => notify(errorText(error))) }}>
+    <Icon name="session" size={15} />{label}
+  </button>
 }
 
 /** The tab body of one history tab: it reads the address the tab was opened under. */
@@ -81,9 +95,12 @@ export function HistoryTab({ address, t, open }: {
     <div className="dt-column dt-history">
       <div className="dt-history-head">
         <p className="dt-history-title">{target.title || target.session}</p>
-        <SessionButton variant="outline" sessionId={target.session} label={t('trackedOpen')} />
+        <span className="dt-mono dt-history-id">{target.session}</span>
       </div>
-      <Body session={target.session} />
+      <div className="dt-history-scroll"><Body session={target.session} /></div>
+      <div className="dt-history-foot">
+        <OpenBar session={target.session} label={t('trackedOpen')} />
+      </div>
     </div>
   </PanelScope>
 }

@@ -8,9 +8,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 
-/** One thing a person reads in a conversation: a request, an answer, or a tool the worker ran. */
+/** One thing a person reads in a conversation: a request, an answer, a passage of reasoning, or a tool the worker ran. */
 export interface HistoryEntry {
-  kind: 'asked' | 'said' | 'tool'
+  kind: 'asked' | 'said' | 'thought' | 'tool'
   /** ISO time of the event, empty when the log did not record one. */
   at: string
   /** The words, already reduced to what a person reads; empty for a tool. */
@@ -79,6 +79,18 @@ function textOf(content: unknown): string {
   }
   return parts.join('\n').trim()
 }
+/** The reasoning parts of a message's content, joined; these are the thoughts a conversation keeps folded away. */
+function reasoningOf(content: unknown): string {
+  if (!Array.isArray(content)) return ''
+  const parts: string[] = []
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue
+    const { type, text } = part as { type?: unknown; text?: unknown }
+    if (type === 'reasoning' && typeof text === 'string') parts.push(text)
+  }
+  return parts.join('\n').trim()
+}
+
 /** The bookkeeping a worker's host writes into its inbox: runtime snapshots, skill reminders and clocks, not what a person asked. */
 const SCAFFOLD = /^(\[Compressed conversation section|Current runtime context|Current working directory|Time sampled while preparing|Browser time zone|A skill is a reusable set|<system-reminder>|<acp |Current DSH file policy|Approval prompts are disabled)/
 
@@ -123,6 +135,8 @@ export function historyView(session: string, home = dshHome()): SessionHistoryVi
       if (text.length > 0 && !scaffold(text)) entries.push({ kind: 'asked', at, text: clip(askedOf(text), TEXT) })
     } else if (event.type === 'assistant/message') {
       const message = data.message as { content?: unknown } | undefined
+      const thought = reasoningOf(message?.content)
+      if (thought.length > 0) entries.push({ kind: 'thought', at, text: clip(thought, TEXT) })
       const text = textOf(message?.content)
       if (text.length > 0) entries.push({ kind: 'said', at, text: clip(text, TEXT) })
     } else if (event.type === 'tool/call') {

@@ -44,6 +44,7 @@ it('turns the events into the requests, answers and tools a person reads', () =>
     called('call-1', 'pwsh', '{"command":"git status"}'), result('call-1', 'clean'), { type: 'turn/start' }])
   expect(historyView('worker-t1', dir)).toEqual({ session: 'worker-t1', entries: [
     { kind: 'asked', at: new Date(1_700_000_000_000).toISOString(), text: '**Fix the typo**\n\nCorrect "recieve".' },
+    { kind: 'thought', at: new Date(1_700_000_001_000).toISOString(), text: 'thinking' },
     { kind: 'said', at: new Date(1_700_000_001_000).toISOString(), text: 'Fixed it.' },
     { kind: 'tool', at: new Date(1_700_000_002_000).toISOString(), text: '',
       tool: { name: 'pwsh', arguments: '{"command":"git status"}', result: 'clean' } },

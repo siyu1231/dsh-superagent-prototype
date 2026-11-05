@@ -53,19 +53,29 @@
 .dt-tracked-item:hover .dt-tracked-open { opacity: 1; }
 .dt-tracked-item:focus-within .dt-tracked-open { opacity: 1; }
 .dt-tracked-open:hover { color: var(--dsw-alias-label-primary); }
-.dt-history { gap: 10px; padding: 10px 12px 16px; overflow: auto; }
-.dt-history-head { display: flex; align-items: center; gap: 8px; }
-.dt-history-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 18px; font-weight: 500; }
-.dt-history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dt-history { height: 100%; min-height: 0; padding: 0; gap: 0; overflow: hidden; }
+.dt-history-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+.dt-history-title { flex: none; max-width: 60%; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 18px; font-weight: 500; }
+.dt-history-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.dt-history-scroll { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 16px; }
+.dt-history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .dt-history-entry { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.dt-history-who { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
-.dt-history-bubble { padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
-.dt-history-said .dt-history-bubble { border: 1px solid var(--dsw-alias-border-l2); background: transparent; }
+.dt-history-asked { align-items: flex-end; }
+.dt-history-bubble { padding: 8px 10px; border-radius: 12px; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+.dt-history-asked .dt-history-bubble { max-width: 88%; background: var(--dsw-alias-bg-layer-2); }
+.dt-history-said .dt-history-bubble { padding: 0; background: none; }
+.dt-history-thought { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.dt-history-thought > summary { cursor: pointer; }
+.dt-history-thought .dt-history-bubble { margin-top: 4px; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-secondary); }
 .dt-history-call { font-size: 12px; line-height: 16px; }
 .dt-history-call > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--dsw-alias-label-secondary); }
 .dt-history-name { color: var(--dsw-alias-label-primary); }
 .dt-history-args { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); }
 .dt-history-result { margin: 6px 0 0; padding: 8px; border-radius: 6px; background: var(--dsw-alias-bg-layer-2); max-height: 220px; overflow: auto; font-size: 12px; line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dt-history-foot { flex: none; padding: 8px 12px 12px; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+.dt-history-open { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 40px; border: 0; border-radius: 12px; background: var(--dsw-alias-label-primary); color: var(--dsw-alias-bg-layer-1); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.dt-history-open:hover { opacity: 0.88; }
+.dt-history-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 .dt-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 /* Transparent block borders preserve vertical spacing when line clamping clips padding. */
 .dt-banner:is(.dt-clamp, .dt-clamp-8) { padding-block: 0; border-block: 8px solid transparent; }

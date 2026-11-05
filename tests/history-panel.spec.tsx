@@ -29,26 +29,35 @@ async function render(props: Record<string, unknown>) {
 }
 afterEach(() => { vi.unstubAllGlobals() })
 
-it('names the Ticket the tab was opened for, and offers the Session itself', async () => {
+it('names the Ticket the tab was opened for, and puts the way into the Session at the foot', async () => {
   serve([asked])
   const view = await render({ address, t, open: async () => {} })
   expect(view.container.textContent).toContain('Fix the README typo')
-  expect(view.container.textContent).toContain(zh.trackedOpen)
+  const foot = view.container.querySelector('.dt-history-foot .dt-history-open')
+  expect(foot?.textContent).toContain(zh.trackedOpen)
   view.dispose()
 })
 
 it('reads a conversation back as what was asked, what was said, and the tools it ran', async () => {
   serve([asked, tool, said])
   const view = await render({ address, t, open: async () => {} })
-  expect(view.container.textContent).toContain(zh.historyAsked)
-  expect(view.container.textContent).toContain(zh.historySaid)
   expect(view.container.textContent).toContain('Correct "recieve".')
   expect(view.container.textContent).toContain('PR #12')
   expect(view.container.querySelectorAll('.dt-history-said .dt-md')).toHaveLength(1)
+  expect(view.container.querySelectorAll('.dt-history-asked')).toHaveLength(1)
   const call = view.container.querySelector('.dt-history-call')!
   expect(call.textContent).toContain('pwsh')
   expect(call.textContent).toContain('{"command":"git status"}')
   expect(call.querySelector('.dt-history-result')?.textContent).toBe('nothing to commit')
+  view.dispose()
+})
+
+it('keeps the worker\'s reasoning folded away until it is asked for', async () => {
+  serve([{ kind: 'thought', at: '2025-12-31T00:00:00.500Z', text: 'The typo is on line 3.' }, said])
+  const view = await render({ address, t, open: async () => {} })
+  const thought = view.container.querySelector('.dt-history-thought')!
+  expect(thought.querySelector('summary')?.textContent).toBe(zh.historyThought)
+  expect(thought.querySelector('.dt-md')?.textContent).toContain('The typo is on line 3.')
   view.dispose()
 })
 
