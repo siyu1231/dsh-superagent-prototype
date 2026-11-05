@@ -68,7 +68,6 @@
 .dt-history-turn-head:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 .dt-history-turn-mark::before { content: '▸'; font-size: 10px; }
 .dt-history-turn-open .dt-history-turn-mark::before { content: '▾'; }
-.dt-history-quiet { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-tertiary); }
 .dt-history-bubble { display: block; max-width: 100%; padding: 8px 10px; border-radius: 12px; overflow-wrap: anywhere; }
 .dt-history-asked .dt-history-bubble { width: fit-content; max-width: 88%; margin-left: auto; background: var(--dsw-alias-bg-layer-2); }
 .dt-history-said .dt-history-bubble { padding: 0; background: none; }

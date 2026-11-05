@@ -128,7 +128,6 @@ const TEXT = {
   historyTitle: ['执行会话', 'Executor Session'],
   historyThought: ['思考', 'Reasoning'],
   historyDone: ['已完成，用时 {seconds} 秒', 'Done in {seconds}s'],
-  historyQuiet: ['这一轮没有留下结论。', 'This turn left no closing words.'],
   historyLogEmpty: ['这一条记录里没有可读的对话。', 'This log holds no conversation to read.'],
   trackedTasks: ['本会话接的单都列在这里，点一条在右侧栏打开它的对话。',
     'Every Ticket this Session took is listed here; pick one to read its conversation in the sidebar.'],

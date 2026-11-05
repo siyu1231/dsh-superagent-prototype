@@ -76,9 +76,7 @@ function Turn({ turn, t }: { turn: readonly Entry[]; t: T }) {
         className={`dt-history-entry dt-history-${entry.kind}`}>
         <Step entry={entry} t={t} />
       </li>)}</ol>
-      : closing
-        ? <div className="dt-history-bubble"><MarkdownLite text={closing.text} /></div>
-        : <p className="dt-history-quiet">{t('historyQuiet')}</p>}
+      : closing && <div className="dt-history-bubble"><MarkdownLite text={closing.text} /></div>}
   </section>
 }
 

@@ -79,10 +79,13 @@ it('keeps the worker\'s reasoning folded away until the turn is opened', async (
   view.dispose()
 })
 
-it('says so when a turn left no closing words', async () => {
+it('shows a turn that ended without words as its row alone, with the steps behind it', async () => {
   serve([asked, tool])
   const view = await render({ address, t, open })
-  expect(view.container.textContent).toContain(zh.historyQuiet)
+  expect(view.container.querySelectorAll('.dt-history-turn')).toHaveLength(1)
+  expect(view.container.querySelector('.dt-history-turn .dt-history-bubble')).toBeNull()
+  await act(async () => { view.container.querySelector<HTMLButtonElement>('.dt-history-turn-head')!.click() })
+  expect(view.container.querySelectorAll('.dt-history-entry').length).toBeGreaterThan(1)
   view.dispose()
 })
 
