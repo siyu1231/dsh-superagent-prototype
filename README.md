@@ -1,14 +1,33 @@
 English | [简体中文](README.zh.md)
 
-# dsh-superagent
+# dsh-superagent (fork)
 
-> **Research prototype for reference only, not an official DeepSeek product.** This code grew out of our team's day-to-day development work, with much of the engineering done by coding agents. Treat it as research code, not production-ready software. It may still contain bugs, and its coding style and engineering practices may be inconsistent. Review and adapt it before using it in your own environment.
->
-> We have adapted it for publication, so it is not identical to our internal version or the implementation described in *Exploring Super-agent Design: Towards a More Autonomous Agent System*. Some designs discussed in the article are directions for future development and are not implemented in this prototype.
+A fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype) (MIT, DeepSeek Harness Team). The upstream design is kept: an agent that turns events into Tickets, works each Ticket in a directory of its own, and answers where it was asked. This fork adapts it to Windows and to many working directories, and gives the router Session a way to be replaced.
 
-dsh-superagent is a proactive coding agent for the working directories you give it, packaged as a bundle for [DeepSeek Harness](https://www.deepseek.com/en/harness/). Each working directory is a Workspace in DSH's own Workspace list, with an optional GitHub repository bound to it. The agent listens to every bound repository and, optionally, to Feishu. When someone allowed asks the agent for work, it opens a work item, works on it in a directory of its own beside that Workspace, and answers in the original conversation, for example with a pull request. A web panel shows what needs a person, and names the Workspace each work item runs in.
+> **Research prototype, not an official DeepSeek product.** Upstream says the same about itself. Review it before using it in your own environment.
 
-It is also a way of working with an agent: **take as little human attention as possible, and give as much value as possible.** An agent that can act for a whole team can also waste a whole team's attention, so it acts only when asked or when a rule the team wrote allows it, and speaks only when someone must act or can use a result. [docs/000-philosophy.md](docs/000-philosophy.md) explains the principle and what it asks of the operator.
+## What upstream already does
+
+- **Event → Ticket → Session.** A Source turns an event into a Trigger, a Policy (with an optional Eval assessment) decides whether it becomes a Ticket, the Ticket gets exactly one executor Session, and the answer goes back to the conversation — usually as a pull request.
+- **Sources.** GitHub (issues, pull requests, comments, CI) and, optionally, Feishu.
+- **Rules, not eagerness.** Nothing is acted on unless a person allowed it or a written rule allows it.
+- **A panel.** Overview, Sources, Triggers, Decisions, Execution, Settings, plus per-record pages.
+- **Isolation.** The bot has its own git identity and its own credential shim; a Ticket never touches the operator's checkout.
+- **Prompts and skills.** The router and the executor each get their own prompt, tool set and skills.
+
+## What this fork changes
+
+**1. Windows.** The plugin starts, resolves CLIs and runs work on Windows while POSIX behaviour is unchanged: PATHEXT lookup, `.cmd` shims that strip themselves from `PATH` and keep exit codes, `cmd.exe` quoting, PowerShell as the prepare shell, Git's schannel certificate settings for the worker, stale-lock reclaim, and a `pwsh`-aware master tool allowlist.
+
+**2. Working directories instead of one repository.** Every folder in DSH's own Workspace list is a working directory; each may bind one GitHub repository, and the GitHub Source only decides the account and which events to receive. One Source polls every bound repository, thread keys are qualified per repository (`owner/name#4` versus `#4`), and each Ticket runs in its own directory beside its Workspace.
+
+**3. A router Session that can be replaced.** A router's context only grows. `orchestrator_new_router`, the panel's **新开编排会话**, or simply starting a new Session in the router's own folder hands duty to a successor, which starts from a briefing — open Tickets, waiting candidates, recent Decisions, policy, Source health — and receives the queued work from then on. The predecessor keeps its history and gets nothing new; exactly one Session is on duty.
+
+**4. A 跟踪 tab and a per-Ticket conversation tab.** In the right column's new-tab page, **跟踪** lists the Tickets this Session took. Opening one shows that Ticket's executor conversation (read from its Session log, folded one row per turn with the closing answer visible and the tools behind it), and a bottom button opens the real Session, restoring it first when it was archived.
+
+**5. Sessions grouped and archived properly.** The plugin's Sessions belong to their DSH Workspace, so they no longer sit under 未分组; a finished Ticket's Session is archived, and opening it restores it instead of landing on an empty conversation.
+
+**6. Documentation.** A Chinese README, Windows notes in `SETUP.md`, and the numbered docs kept in step with the code (`003-execution.md`, `005-panel.md`, `007-architecture.md`).
 
 ## Setup
 
@@ -16,38 +35,14 @@ Setup has many steps, so an agent does it with you. Ask your coding agent:
 
 > Read SETUP.md in this repository and set up dsh-superagent with me.
 
-It asks one short question at a time, shows the full plan once, and then installs and configures everything. [SETUP.md](SETUP.md) is what it follows.
+On Windows the deployment lives in its own DSH profile, so the plugin's process-wide PATH and git settings cannot leak into your own sessions. See [SETUP.md](SETUP.md) and [docs/006-deployment.md](docs/006-deployment.md).
 
 ## Documentation
 
-Read the numbered documents in order; each builds only on the ones before it.
-
-- [000 Philosophy](docs/000-philosophy.md)
-- [001 Domain model](docs/001-domain.md)
-- [002 Authorization](docs/002-authorization.md)
-- [003 Execution](docs/003-execution.md)
-- [004 Prompts](docs/004-prompts.md)
-- [005 Panel](docs/005-panel.md)
-- [006 Deployment](docs/006-deployment.md): manual setup, configuration, upgrades and troubleshooting
-- [007 Architecture](docs/007-architecture.md)
-- [008 Cookbook](docs/008-cookbook.md): adding a Source
-
-## Workspaces
-
-A Workspace is the unit that decides where work happens and which repository its work items come from. The settings page under **Execution → Workspaces** lists them: each entry has a name, a directory, an optional repository, an optional prepare command and an enabled switch. A directory left empty runs under the Execution root, and one repository may be bound to one Workspace only.
-
-The list is not a second list of folders. DSH already keeps one Workspace per directory a Session runs in, and every one of those folders is a working directory here: the panel keeps the two lists in step at start, so a folder you work in needs no second step. A directory added here is registered in DSH's Workspace list too, so it shows up in the sidebar beside the folders you work in. A work item's own directory is listed there only while the work item is open, and its entry is dropped when it ends — the directory and its Session logs stay.
-
-Existing installations upgrade in place: the repository from the GitHub Source becomes the first Workspace, named after the repository.
-
-## Platforms
-
-dsh-superagent runs on POSIX systems and on Windows, from the same code. On Windows the runtime resolves `gh` and `lark-cli` through `PATH` and `PATHEXT`, writes `<name>.cmd` command shims, starts batch files through `cmd.exe` because Node cannot start one directly, and runs a prepare command in `pwsh` (or `powershell.exe`) instead of `sh`. On POSIX it keeps extensionless shims and `sh -c`. The test suite runs on both.
-
-## Development
-
-`pnpm check` runs the typecheck, the tests and the build.
+- [000 Philosophy](docs/000-philosophy.md) · [001 Domain model](docs/001-domain.md) · [002 Authorization](docs/002-authorization.md)
+- [003 Execution](docs/003-execution.md) · [004 Prompts](docs/004-prompts.md) · [005 Panel](docs/005-panel.md)
+- [006 Deployment](docs/006-deployment.md) · [007 Architecture](docs/007-architecture.md) · [008 Cookbook](docs/008-cookbook.md)
 
 ## License
 
-[MIT](LICENSE)
+MIT, as upstream. Copyright for the original work belongs to the DeepSeek Harness Team; this fork's changes are published under the same licence.
