@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { key, liveTicket, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
+import { sameDirectory } from '../infra/environment.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
 import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
@@ -30,6 +31,15 @@ export interface SessionsHost {
   /** The `models` health entry, which reports managed sessions waiting on a model-budget retry. */
   readonly health: HealthEntry
   readonly masterId: string
+  /** The directory the router works in: a Session a person creates there takes over router duty. */
+  readonly routerDirectory: string
+  /** When the plugin started, in milliseconds: a Session created earlier is history, not a new router. */
+  readonly startedAt: number
+  /**
+   * Hand router duty to `sessionId`, a Session created in the router's directory, and brief it. Answers whether it took
+   * duty now; false when another handover moved the pointer first.
+   */
+  adoptRouter(sessionId: string, title: string): Promise<boolean>
   readonly lifetime: AbortSignal
   closing(): boolean
   /** Execution environment variables for `ticket`, rendered into its worker's system prompt. */
@@ -241,6 +251,31 @@ export class Sessions {
       ? { state: 'error', detail: retries.slice(0, 5).map(item => `${item.sessionId}: ${item.provider} is over its model budget; retried ${item.attempts} times, waiting since ${item.since}; the model and retry policy are unchanged`).join('; ') + (retries.length > 5 ? `; ${retries.length - 5} more Sessions` : ''), at: retries.at(-1)!.lastAt }
       : { state: 'ready', detail: 'No managed Session is waiting on a model budget retry' })
   }
+  /**
+   * Takes over router duty when `agent` is a Session a person started in the router's own directory. Only a Session created
+   * after the plugin started counts: older ones are history, and resuming one must not move the pointer back.
+   */
+  private async adopt(agent: Agent): Promise<boolean> {
+    const header = agent.session.header as { cwd?: string; createdAt?: number; title?: string } | undefined
+    if (!header || typeof header.cwd !== 'string' || typeof header.createdAt !== 'number') return false
+    if (header.createdAt < this.host.startedAt) return false
+    if (!sameDirectory(header.cwd, this.host.routerDirectory)) return false
+    try {
+      if (!await this.host.adoptRouter(agent.id, header.title?.trim() || 'dsh-superagent orchestrator')) return false
+    } catch (error: unknown) {
+      this.ctx.logger.warn('dsh-superagent could not take router duty in Session %s: %s', agent.id, String(error))
+      return false
+    }
+    this.routedPreset(agent)
+    return true
+  }
+  /** Selects the router preset on a Session that just took duty, before its first turn, so its shell limits match its role. */
+  private routedPreset(agent: Agent): void {
+    try {
+      const presets = this.ctx.get('agentPresets') as { select(agent: Agent, preset: string): Promise<string> } | undefined
+      presets?.select(agent, ROUTER_PRESET).catch(() => { /* DSH refuses a selection once the first turn ran */ })
+    } catch { /* a profile without the preset registry keeps the Session's own preset */ }
+  }
   private ticketOf(agent: Agent): Ticket | undefined {
     const ticketId = ticketOfSession(agent.id)
     return ticketId === undefined ? undefined : this.host.store.tickets.get(ticketId)
@@ -248,8 +283,11 @@ export class Sessions {
   private async decorate(agent: Agent): Promise<void> {
     if (this.bindings.has(agent)) return
     const host = this.host
-    const master = agent.id === host.masterId
-    const ticket = master ? undefined : this.ticketOf(agent)
+    let master = agent.id === host.masterId
+    let ticket = master ? undefined : this.ticketOf(agent)
+    // A Session a person starts in the router's own directory is the new router: that is DSH's own
+    // `New Session`, and asking for a handover as well would be one step too many.
+    if (!master && !ticket && await this.adopt(agent)) master = true
     if (!master && !ticket) { this.limitSubagent(agent); return }
     const binding: SessionBinding = { disposers: [] }
     this.bindings.set(agent, binding)

@@ -80,8 +80,12 @@ export class Runtime extends Service implements SourceHost {
   private readonly runtimeHealth = this.board.claim('runtime', { state: 'starting', detail: '' })
   /** The Session on router duty; it changes when a router hands over to a successor. */
   private master = ''
+  /** When this Runtime was built: only Sessions created after it may take router duty by being created. */
+  readonly startedAt = Date.now()
   /** Router turns in progress, so two callers cannot start two successors at once. */
   private handingOver?: Promise<{ previous: string; session: string }>
+  /** Successors this Runtime is creating right now: they take duty through the handover, not by being created. */
+  private readonly preparing = new Set<string>()
   private readonly sourceLinks = new TextCache(200_000)
   private readonly stopped = new AbortController()
   private readonly disposers: (() => void)[] = []
@@ -135,7 +139,8 @@ export class Runtime extends Service implements SourceHost {
         promptVersion: id => this.sessions.promptVersion(id), mayRead: (id, revision) => this.sessions.mayRead(id, revision),
         feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link }
       const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'),
-        get masterId() { return runtime.masterId }, lifetime: this.lifetime,
+        get masterId() { return runtime.masterId }, routerDirectory: machine.stateDir, startedAt: this.startedAt,
+        adoptRouter: (session, title) => this.adoptRouter(session, title), lifetime: this.lifetime,
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
@@ -225,15 +230,34 @@ export class Runtime extends Service implements SourceHost {
     this.runtimeHealth.set({ state: 'ready', detail: `Router handover: ${reason}`, at: now() })
     return this.handingOver ??= this.handover().finally(() => { this.handingOver = undefined })
   }
+  /**
+   * Takes router duty in a Session a person started in the router's own directory, briefing it the way a handover does.
+   * Answers whether it took duty; false when it already was the router or another handover moved the pointer first.
+   */
+  async adoptRouter(sessionId: string, title: string): Promise<boolean> {
+    if (sessionId === this.masterId || this.preparing.has(sessionId)) return false
+    this.runtimeHealth.set({ state: 'ready', detail: `Router handover: ${title} started in the router directory`, at: now() })
+    const moved = await (this.handingOver ??= this.handOverTo(sessionId).finally(() => { this.handingOver = undefined }))
+    return moved.session === sessionId
+  }
   private async handover(): Promise<{ previous: string; session: string }> {
     const previous = this.masterId
     const base = this.store.get(KV.runtime.routerBase) ?? previous
     const epoch = (this.store.get(KV.runtime.routerEpoch) ?? 0) + 1
     const session = `${base}-${epoch}`
-    await this.sessions.ensure(session, this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
+    // A successor is created here, so its decoration must not take duty a second time as a Session made by a person.
+    this.preparing.add(session)
+    try {
+      await this.sessions.ensure(session, this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
+    } finally { this.preparing.delete(session) }
+    return this.handOverTo(session, epoch)
+  }
+  /** Moves router duty to `session`, which already exists, and briefs it; `epoch` names a successor of the recorded base. */
+  private async handOverTo(session: string, epoch?: number): Promise<{ previous: string; session: string }> {
+    const previous = this.masterId
     this.master = session
     this.store.set(KV.runtime.masterId, session)
-    this.store.set(KV.runtime.routerEpoch, epoch)
+    if (epoch !== undefined) this.store.set(KV.runtime.routerEpoch, epoch)
     const policy = settingsPolicy(this.store.settings(), this.sources)
     const text = handoverText({
       session, previous, at: now(), policyVersion: policy.version, paused: policy.paused,

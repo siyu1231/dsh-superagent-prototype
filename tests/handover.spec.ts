@@ -1,5 +1,6 @@
 // The briefing a successor router Session receives when its predecessor hands over, and the pointer that moves with it.
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
 import type { Decision, Ticket } from '../src/core/index.ts'
 import { handoverText, type Handover } from '../src/app/handover.ts'
 import { startRuntime, type Host } from './fixtures/host.ts'
@@ -86,3 +87,33 @@ it('derives the next successor from the same base, and sends later work only to 
   expect(sent(second.session).some(call => call.text.includes('The deployment moved on.'))).toBe(true)
   expect(sent(first.session).some(call => call.text.includes('The deployment moved on.'))).toBe(false)
 })
+
+it('takes router duty when a person starts a Session in the router directory', async () => {
+  const previous = h.runtime.masterId
+  const agent = await h.controller.create({ sessionId: 'chat-1', title: 'my own chat' }) as unknown as { id: string }
+  h.ctx.emit('agent/created', { agent: h.agents.get(agent.id) } as never)
+  // Duty moves before the briefing is written, so wait for the briefing itself rather than the pointer.
+  await vi.waitFor(() => expect(sent('chat-1').length).toBeGreaterThan(0))
+  expect(h.runtime.masterId).toBe('chat-1')
+  const brief = sent('chat-1').find(call => call.text.includes('# Router handover'))
+  expect(brief?.text).toContain(`\`${previous}\` is no longer on duty`)
+})
+
+it('leaves the Session on duty alone when an older Session in the router directory is opened again', async () => {
+  const previous = h.runtime.masterId
+  const agent = await h.controller.create({ sessionId: 'chat-old', createdAt: Date.now() - 60_000 }) as unknown as { id: string }
+  h.ctx.emit('agent/created', { agent: h.agents.get(agent.id) } as never)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(h.runtime.masterId).toBe(previous)
+  expect(sent('chat-old')).toEqual([])
+})
+
+it('does not take router duty for a Session started outside the router directory', async () => {
+  const previous = h.runtime.masterId
+  const agent = await h.controller.create({ sessionId: 'chat-2', cwd: join(h.directory, 'work', 'somewhere') }) as unknown as { id: string }
+  h.ctx.emit('agent/created', { agent: h.agents.get(agent.id) } as never)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(h.runtime.masterId).toBe(previous)
+})
+
+

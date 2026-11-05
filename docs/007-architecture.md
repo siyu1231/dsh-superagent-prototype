@@ -234,6 +234,8 @@ Validation inherits an omitted base from the saved override, drops removed parts
 
 `Sessions` (`src/app/sessions.ts`) manages DeepSeek Harness Sessions for both roles. `ensure` creates a Session with its role's model. `install` follows agent events and registers prompts, skills and tools for managed Sessions.
 
+A Session the plugin did not create takes router duty when a person starts it in the router's own directory: `decorate` asks `Runtime.adoptRouter` for Sessions whose header is newer than this process and whose directory is the router's, and that call hands over the same way the header button does. `routedPreset` applies the router preset to such a Session before its first turn, because DeepSeek Harness refuses a selection afterwards.
+
 `prompt` delivers once per request id. `relay` and `notify` enqueue main-Session messages handled by the `relay` and `notice` effects. `src/app/notices.ts` defines their content; `delivery` checks whether a message arrived.
 
 Each model request binds the Session to the current prompt revision. The revisions it used are stored durably: `promptVersion` identifies the active one and `mayRead` restricts which versions a worker can inspect. Registrations are tracked in one map per agent.

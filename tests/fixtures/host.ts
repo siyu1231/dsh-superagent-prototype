@@ -169,8 +169,8 @@ export async function startRuntime(seed?: (store: Store) => void) {
   let http!: HttpHandler
   const resolveDefault = async (id: string) => agents.has(id) ? { agent: agents.get(id) } : { error: { code: 'session/not-found' } }
   const controller = {
-    create: vi.fn(async ({ sessionId }: { sessionId: string }) => {
-      if (agents.has(sessionId)) return
+    create: vi.fn(async ({ sessionId, cwd, createdAt, title }: { sessionId: string; cwd?: string; createdAt?: number; title?: string }) => {
+      if (agents.has(sessionId)) return agents.get(sessionId)
       const agentCtx = new Context()
       const sessionTools = new Map<string, RegisteredTool>()
       tools.set(sessionId, sessionTools)
@@ -211,7 +211,9 @@ export async function startRuntime(seed?: (store: Store) => void) {
         turn++
         take(true)
       })
-      const session = { id: sessionId, snapshotEvents: () => [], requestHeader: () => undefined, append: vi.fn() }
+      // A Session's header says where it runs and when it was created, which is what decides whether it is a new router.
+      const session = { id: sessionId, header: { cwd: cwd ?? directory, createdAt: createdAt ?? Date.now(), title: title ?? sessionId },
+        snapshotEvents: () => [], requestHeader: () => undefined, append: vi.fn() }
       let status = 'idle'
       const idle: (() => void)[] = []
       // A cancel drops the inbox unless kept, and the turn it stops ends a moment later, which DSH says.
@@ -229,6 +231,7 @@ export async function startRuntime(seed?: (store: Store) => void) {
         get status() { return status }, set status(next: string) { status = next; if (next === 'idle') for (const wake of idle.splice(0)) wake() },
         // Once its turn ended, as DSH's does.
         whenIdle: () => status === 'idle' ? Promise.resolve() : new Promise<void>(resolve => { idle.push(resolve) }) } as never)
+      return agents.get(sessionId)
     }),
     selectModel: vi.fn(async () => {}), resolveAgent: vi.fn(resolveDefault), rename: vi.fn(async () => {}),
     prompt: vi.fn(() => { throw new Error('Plugin delivery must not use user RPC') }),

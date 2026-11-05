@@ -14,7 +14,7 @@ Opening the panel answers three questions, in this order:
 
 The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, **Execution**, and **Settings**. Until repository and account setup succeeds, Overview shows what is missing and links to the relevant setting.
 
-**新开编排会话** (New router Session) in the header hands router duty to a successor Session. The successor starts from a briefing — the open Tickets, the candidates still waiting for a decision, the recent Decisions and the policy — and the predecessor keeps its history but receives nothing new, so a router whose context grew long can be replaced without losing what the deployment holds. There is always exactly one Session on duty; the panel and every message follow it.
+**新开编排会话** (New router Session) in the header hands router duty to a successor Session. The successor starts from a briefing — the open Tickets, the candidates still waiting for a decision, the recent Decisions and the policy — and the predecessor keeps its history but receives nothing new, so a router whose context grew long can be replaced without losing what the deployment holds. There is always exactly one Session on duty; the panel and every message follow it. A person who starts an ordinary Session in the router's own directory (the deployment's state directory) takes duty the same way, without the button: the plugin briefs that Session and moves the pointer, so the habit of starting a new conversation in that folder is enough. Sessions created there before the deployment started, or in any other directory, keep their own role.
 
 | Tab | Shows |
 | --- | --- |
