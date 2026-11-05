@@ -17,13 +17,14 @@ const directory = (name: string): string => {
 }
 /** A registry holding `records`, remembering what was asked of it. */
 const registry = (records: WorkspaceRecord[] = []) => {
-  const created: { path: string; title?: string }[] = [], deleted: string[] = []
+  const created: { path: string; title?: string }[] = [], deleted: string[] = [], archived: string[] = []
   const service: WorkspaceRegistry = {
     list: () => records,
     create: async (path, title) => { created.push({ path, ...title ? { title } : {} }); return { id: `w${created.length}` } },
     delete: async id => { deleted.push(id); return true },
+    archiveSession: async sessionId => { archived.push(sessionId) },
   }
-  return { service, created, deleted }
+  return { service, created, deleted, archived }
 }
 const record = (id: string, path: string, title: string, sessionIds: string[] = []): WorkspaceRecord => ({ id, path, title, sessionIds })
 
@@ -49,9 +50,14 @@ it('registers a bound directory once, and only when DSH does not list it yet', a
 it('drops the entry of a finished Ticket directory, and leaves every other Workspace listed', async () => {
   const web = directory('web'), ticket = directory('ticket')
   mkdirSync(ticket, { recursive: true })
-  const { service, deleted } = registry([record('w1', web, 'Web app'), record('w2', ticket, 'Fix the typo')])
-  await retire(service, ticket)
+  const { service, deleted, archived } = registry([record('w1', web, 'Web app'), record('w2', ticket, 'Fix the typo', ['worker-1'])])
+  await retire(service, ticket, ['worker-1'])
   expect(deleted).toEqual(['w2'])
+  // The Session that ran in the Ticket's own directory is archived with it, so the sidebar stops listing it as ungrouped.
+  expect(archived).toEqual(['worker-1'])
+  // A directory whose Workspace an earlier version already dropped still has its Session archived by id.
+  await retire(service, join(web, 'gone'), ['worker-2'])
+  expect(archived).toEqual(['worker-1', 'worker-2'])
   // Nothing to drop, and nothing asked of DSH: a directory it does not list, and one that never had a folder.
   await retire(service, join(web, 'nowhere'))
   await retire(service, '')

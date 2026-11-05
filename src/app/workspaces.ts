@@ -27,6 +27,8 @@ export interface WorkspaceRegistry {
   list(): readonly WorkspaceRecord[]
   create(path: string, title?: string): Promise<WorkspaceHandle>
   delete(id: string): Promise<boolean>
+  /** Hides a Session from the sidebar without touching its log; absent on older DSH builds. */
+  archiveSession?(sessionId: string): Promise<void>
 }
 
 /** One Workspace as the panel shows it. */
@@ -81,12 +83,16 @@ export async function adopt(registry: WorkspaceRegistry, directory: string, titl
 }
 
 /**
- * Drops the sidebar entry a finished Ticket's own directory left in DSH's Workspace list: one directory per Ticket would
- * otherwise pile up beside the directories a person actually works in. The directory, its worktree and its Session logs
- * stay; only the entry goes.
+ * Drops the sidebar entry a finished Ticket's own directory left in DSH's Workspace list, and archives the Sessions that
+ * ran there: one directory per Ticket would otherwise pile up beside the directories a person actually works in, and a
+ * Session without a Workspace to sit under would be listed as ungrouped for ever. The directory, its worktree and its
+ * Session logs stay; the entry and the sidebar rows go.
  */
-export async function retire(registry: WorkspaceRegistry, directory: string): Promise<void> {
+export async function retire(registry: WorkspaceRegistry, directory: string, sessions: readonly string[] = []): Promise<void> {
   if (!directory) return
   const held = registry.list().find(workspace => sameDirectory(workspace.path, directory))
+  for (const sessionId of new Set([...sessions, ...(held?.sessionIds ?? [])])) {
+    await registry.archiveSession?.(sessionId).catch(() => { /* a Session that is still running stays listed */ })
+  }
   if (held) await registry.delete(held.id)
 }

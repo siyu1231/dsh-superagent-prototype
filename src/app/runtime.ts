@@ -156,8 +156,8 @@ export class Runtime extends Service implements SourceHost {
           if (followup) sessions.relay(followup.id, followup.text)
           // Notify the ticket's conversations whenever it ends via a pull request.
           const ended = event.type === 'ticket.ended' ? store.tickets.get(event.data.ticketId) : undefined
-          // Its own directory leaves DSH's Workspace list: one entry per Ticket would pile up beside the real folders.
-          if (ended?.execution?.directory) void retire(ctx.workspaceRegistry, ended.execution.directory).catch(() => {})
+          // Its own directory leaves DSH's Workspace list, and the Session that ran there stops being an ungrouped entry.
+          if (ended?.execution?.directory) void retire(ctx.workspaceRegistry, ended.execution.directory, [workerSessionId(ended.id)]).catch(() => {})
           if (ended && setup.configured()) {
             const request = store.triggers.get(ended.origin.triggerId)?.text ?? ''
             // The notice links the PR in the repository the ticket worked in, which is its Workspace's, not the Source's own.
@@ -223,9 +223,12 @@ export class Runtime extends Service implements SourceHost {
     this.sessions.install()
     this.executor.install()
     await this.sessions.ensure(this.masterId, this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
-    // The directory of a Ticket that ended while an earlier version ran left its own entry in DSH's Workspace list.
+    // The directory of a Ticket that ended while an earlier version ran left its own entry in DSH's Workspace list, and
+    // the Session that ran there is still listed: retire them now, so an upgrade tidies the sidebar by itself.
     for (const ended of this.store.tickets.list()) {
-      if (ended.ended && ended.execution?.directory) void retire(this.ctx.workspaceRegistry, ended.execution.directory).catch(() => {})
+      if (ended.ended && ended.execution?.directory) {
+        void retire(this.ctx.workspaceRegistry, ended.execution.directory, [workerSessionId(ended.id)]).catch(() => {})
+      }
     }
     // A working directory an operator gave a Ticket root of its own is a Workspace of DSH's list too, so both lists name
     // the same folders: register the ones DSH does not list yet. Missing directories are left for the operator to fix.
