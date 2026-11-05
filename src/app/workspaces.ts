@@ -15,10 +15,17 @@ export interface WorkspaceRecord {
   sessionIds: readonly string[]
 }
 
+/** The Workspace DSH hands back for a directory: its identity, and the one write this plugin makes to it. */
+export interface WorkspaceHandle {
+  id: string
+  /** Adds a Session to the Workspace's own account, which is what the sidebar groups by; absent on older DSH builds. */
+  attachSession?(sessionId: string): Promise<void>
+}
+
 /** The part of DSH's Workspace registry dsh-superagent keeps in step. */
 export interface WorkspaceRegistry {
   list(): readonly WorkspaceRecord[]
-  create(path: string, title?: string): Promise<{ id: string }>
+  create(path: string, title?: string): Promise<WorkspaceHandle>
   delete(id: string): Promise<boolean>
 }
 

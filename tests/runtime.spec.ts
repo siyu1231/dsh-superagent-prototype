@@ -77,6 +77,8 @@ async function receive(trigger: Trigger, target = runtime) {
   return result
 }
 let services: Record<string, unknown>
+/** Sessions the runtime attached to their Workspace, i.e. the ones DSH's sidebar can group. */
+let grouped: string[]
 /** DSH's job registry the Runtime's Executor reads its workers' shell jobs from. */
 let jobs: ReturnType<typeof jobRegistry>
 /** What worker commands of the startup checks print, by argv; an Error makes the command fail with its message. */
@@ -138,6 +140,7 @@ async function acceptedTicket(trigger = feishu('1', '@bot 修一下回归')) {
 }
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'orchestrator-runtime-'))
+  grouped = []
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : args[1]?.includes('/pulls/') ? { state: 'open', user: { login: 'agent-bot' }, html_url: 'https://github.com/acme/widgets/pull/' + args[1].split('/').at(-1), head: { ref: `agent/${String(runtime.store.tickets.list()[0]?.execution?.name)}`, sha: 'head-1', repo: { full_name: 'acme/widgets' } } } : { default_branch: 'master', permissions: { push: true } })
   vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ users: [{ member_id: MEMBER, name: 'Alice' }], has_more: false })
   vi.spyOn(Commands.prototype, 'git').mockResolvedValue('')
@@ -205,7 +208,7 @@ beforeEach(async () => {
     inspect: vi.fn(async () => ({ events: [] })),
   }
   jobs = jobRegistry()
-  services = { agents, llm: { resolveCallConfig: vi.fn(async value => value) }, sessionController: controller, sessionPersistence: { flush: vi.fn(async () => {}), open: vi.fn(async () => ({ read: async () => ({ events: [] }), [Symbol.asyncDispose]: async () => {} })) }, workspaceRegistry: { list: () => [], create: async (cwd: string) => ({ id: cwd }), delete: async () => true }, permissionPresets: { set: () => {} }, subprocess, webServer: { host: '127.0.0.1', port: 3082, register: (route: { handler: HttpHandler }) => { http = route.handler; return () => {} } }, jobs: jobs.service }
+  services = { agents, llm: { resolveCallConfig: vi.fn(async value => value) }, sessionController: controller, sessionPersistence: { flush: vi.fn(async () => {}), open: vi.fn(async () => ({ read: async () => ({ events: [] }), [Symbol.asyncDispose]: async () => {} })) }, workspaceRegistry: { list: () => [], create: async (cwd: string) => ({ id: cwd, attachSession: async (sessionId: string) => { grouped.push(sessionId) } }), delete: async () => true }, permissionPresets: { set: () => {} }, subprocess, webServer: { host: '127.0.0.1', port: 3082, register: (route: { handler: HttpHandler }) => { http = route.handler; return () => {} } }, jobs: jobs.service }
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
   for (const cli of [AGENT(), OTHER(), BOT()]) writeFileSync(cli, '#!/bin/sh\n', { mode: 0o755 })
   const store = new Store(join(directory, 'orchestrator.sqlite')); seed(store); store.close()
@@ -240,6 +243,12 @@ it('relays an explicit member mention as a candidate and creates the ticket, ack
     thread: `feishu:${CHAT}:om_1`, text: trigger.text }) })
   expect(first.trigger).not.toHaveProperty('read')
   expect(await route({ kind: 'accept', trigger_id: trigger.id, title: 'again', worktree_name: worktreeName, acknowledgement: 'x' })).toMatchObject({ ticket: { ticket_id: ticket.id } })
+})
+
+it('attaches its Sessions to their Workspace, so DSH\'s sidebar groups them instead of leaving them ungrouped', async () => {
+  expect(grouped).toContain(runtime.masterId)
+  const { sessionId } = await acceptedTicket()
+  expect(grouped).toContain(sessionId)
 })
 
 it('fans a person\'s later thread message out to the live worker as context and tells the orchestrator, without an Eval', async () => {

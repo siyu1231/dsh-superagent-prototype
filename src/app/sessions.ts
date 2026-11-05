@@ -146,15 +146,22 @@ export class Sessions {
   async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
-    if ('error' in result && result.error.code === 'session/not-found') {
-      // The Workspace carries the Session's directory into DSH's own list, named as the Session is.
-      const workspace = await ctx.workspaceRegistry.create(cwd, title)
+    // The Workspace carries the Session's directory into DSH's own list, named as the Session is.
+    const workspace = result && 'error' in result && result.error.code === 'session/not-found'
+      ? await ctx.workspaceRegistry.create(cwd, title)
+      : undefined
+    if (workspace) {
       // A Session keeps the preset it was created with, one of the bundle's own (cordis.patch.yml).
       await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
         agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
       result = await ctx.sessionController.resolveAgent(id as SessionId)
     }
     if ('error' in result) throw result.error
+    // A Session sits under a Workspace in DSH's sidebar only while that Workspace accounts for it, and DSH leaves the
+    // accounting to whoever creates the Session: without this the plugin's own Sessions stay in the ungrouped bucket.
+    // Attaching is idempotent, so it also repairs Sessions created before this ran.
+    const holder = workspace ?? await ctx.workspaceRegistry.create(cwd, title)
+    if (holder.attachSession) await holder.attachSession(id as SessionId).catch(() => { /* grouping is DSH's own bookkeeping */ })
     const settings = this.host.store.settings()
     await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
     await this.decorate(result.agent)

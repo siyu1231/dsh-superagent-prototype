@@ -41,7 +41,7 @@ import { Setup } from './setup.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
-import { included, retire, workspaceEntries, workspaceId, type WorkspaceRegistry } from './workspaces.ts'
+import { adopt, included, retire, workspaceEntries, workspaceId, type WorkspaceRegistry } from './workspaces.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
@@ -226,6 +226,11 @@ export class Runtime extends Service implements SourceHost {
     // The directory of a Ticket that ended while an earlier version ran left its own entry in DSH's Workspace list.
     for (const ended of this.store.tickets.list()) {
       if (ended.ended && ended.execution?.directory) void retire(this.ctx.workspaceRegistry, ended.execution.directory).catch(() => {})
+    }
+    // A working directory an operator gave a Ticket root of its own is a Workspace of DSH's list too, so both lists name
+    // the same folders: register the ones DSH does not list yet. Missing directories are left for the operator to fix.
+    for (const workspace of this.store.settings().workspaces) {
+      if (workspace.directory) await adopt(this.ctx.workspaceRegistry, workspace.directory, workspace.name).catch(() => {})
     }
     for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
     // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
