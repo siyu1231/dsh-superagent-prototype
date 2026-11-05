@@ -47,7 +47,8 @@ it('reads a conversation back as what was asked, what was said, and the tools it
   expect(view.container.querySelectorAll('.dt-history-asked')).toHaveLength(1)
   const call = view.container.querySelector('.dt-history-call')!
   expect(call.textContent).toContain('pwsh')
-  expect(call.textContent).toContain('{"command":"git status"}')
+  // A call reads as one line: its name and the argument that says what it did.
+  expect(call.textContent).toContain('git status')
   expect(call.querySelector('.dt-history-result')?.textContent).toBe('nothing to commit')
   view.dispose()
 })

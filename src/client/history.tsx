@@ -49,7 +49,7 @@ function Body({ session }: { session: string }) {
       {entry.kind === 'tool'
         ? <details className="dt-history-call">
           <summary><Icon name="session" size={13} /><span className="dt-mono dt-history-name">{entry.tool?.name}</span>
-            <span className="dt-history-args">{entry.tool?.arguments}</span></summary>
+            <span className="dt-history-args">{hint(entry.tool?.arguments)}</span></summary>
           {entry.tool?.result !== undefined && <pre className="dt-history-result">{entry.tool.result}</pre>}
         </details>
         : entry.kind === 'thought'
@@ -69,6 +69,21 @@ function OpenBar({ session, label }: { session: string; label: string }) {
     onClick={() => { openSession(session).catch(error => notify(errorText(error))) }}>
     <Icon name="session" size={15} />{label}
   </button>
+}
+
+/** The most telling argument of a call, so a tool row reads as one line instead of a wall of JSON. */
+function hint(arguments_: string | undefined): string {
+  if (!arguments_) return ''
+  try {
+    const value: unknown = JSON.parse(arguments_)
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const key of ['command', 'description', 'path', 'query', 'resource', 'url']) {
+        const found = (value as Record<string, unknown>)[key]
+        if (typeof found === 'string' && found.trim().length > 0) return found
+      }
+    }
+  } catch { /* not JSON: show what the log holds */ }
+  return arguments_
 }
 
 /** The tab body of one history tab: it reads the address the tab was opened under. */
@@ -95,7 +110,6 @@ export function HistoryTab({ address, t, open }: {
     <div className="dt-column dt-history">
       <div className="dt-history-head">
         <p className="dt-history-title">{target.title || target.session}</p>
-        <span className="dt-mono dt-history-id">{target.session}</span>
       </div>
       <div className="dt-history-scroll"><Body session={target.session} /></div>
       <div className="dt-history-foot">
