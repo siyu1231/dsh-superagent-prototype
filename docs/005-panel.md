@@ -12,7 +12,7 @@ Opening the panel answers three questions, in this order:
 
 ## Tabs
 
-The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, **Execution**, and **Settings**. Until repository and account setup succeeds, Overview shows what is missing and links to the relevant setting.
+The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, **Execution**, **Sessions**, and **Settings**. Until repository and account setup succeeds, Overview shows what is missing and links to the relevant setting.
 
 | Tab | Shows |
 | --- | --- |
@@ -21,9 +21,12 @@ The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, *
 | Trigger | Threads filtered by Subscribed, Evaluating, New Triggers in 24 h, or All Threads. Each Thread shows its Triggers newest first, Decisions and Subscriptions |
 | Eval | Decisions with their reason and matched rules |
 | Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, Working, Waiting for a Trigger or Ended. Ticket details show actions, authorization, waiting Inputs, Subscriptions and Assignments, and name the Workspace the Ticket runs in |
+| Sessions | The router's Session and one executor Session per Ticket that started an Assignment, each with the Workspace it ran in, its state and its directory; **Open** shows the Session in DeepSeek Harness |
 | Settings | Sources, Eval, Execution, Prompts and Deployment. Each group includes its save history |
 
 ### Reading individual records
+
+The router Session's row in DeepSeek Harness's sidebar carries a button that opens **Sessions**, which lists the executor Sessions that Session started. Each executor Session shows its Ticket, Workspace, state and directory, and **Open** shows it in DeepSeek Harness.
 
 A dropped message links to its Ticket, or to its Thread when it has no Ticket. The Source page explains whether its conversation disappeared or the Source stopped listening to it.
 

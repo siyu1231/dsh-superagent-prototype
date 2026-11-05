@@ -100,6 +100,12 @@ it('answers a prompt save that lost a race with 409, and a settings body over 12
   expect(saves).toEqual([])
 })
 
+it('serves the Session list the panel shows for the router', async () => {
+  const call = serve({ masterId: 'orchestrator-1',
+    store: { tickets: { list: () => [] }, blockRevision: () => 0, settings: () => ({ workspaces: [] }) } })
+  expect(await call('GET', 'sessions')).toEqual({ status: 200, body: { master: 'orchestrator-1', sessions: [] } })
+})
+
 it('lists the Workspaces DSH holds, and registers a bound directory that DSH does not list yet', async () => {
   const created: string[] = []
   const call = serve({

@@ -27,6 +27,7 @@ import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
 import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
+import { sessionList } from './views/sessions.ts'
 import { adopt, workspaceEntries, type WorkspaceRegistry } from './workspaces.ts'
 
 export interface HttpHost {
@@ -174,6 +175,7 @@ function routes(runtime: HttpHost): Routes {
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),
     'GET settings': () => settingsView(store, runtime.sources, runtime.health, setupState(runtime), runtime.machine.stateDir),
     'GET workspaces': () => ({ workspaces: workspaceEntries(runtime.workspaces) }),
+    'GET sessions': () => sessionList(store, runtime.masterId),
     'POST sources/:id/labels': ({ params }) => runtime.settings.refreshLabels(params.id),
     'GET threads': ({ query }) => {
       const { filter, offset, limit } = ThreadsQuery.parse(query)
