@@ -13,9 +13,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { openKnownSession, SessionNavigationError } from '../navigation.ts'
 import { App } from './app.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
-import { askPage } from './focus.ts'
 import { en, zh } from './locales.ts'
-import { TrackedSessionButton } from './sessions.tsx'
+import { TrackedTasks } from './tracked.tsx'
 import type { T } from './text.ts'
 
 type ClientContext = Context & { sessions: ISessions }
@@ -47,19 +46,27 @@ function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
   return <App t={t} openSession={openSession} deploymentForm={form} />
 }
 
-export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'layout']
-/** Registers the panel, sidebar icon, and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
+export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace']
+/** Registers the panel, sidebar icon, Plugin Manager config view, and the Session view that lists the tracked Tickets. */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-superagent: dictionaries')
   const t = ctx.locale.bind(NS)
   ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS, inject: () => ({}) },
     (props: { t: T }) => <Mounted ctx={ctx} t={props.t} />))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 10, label: () => t('panel'), locale: NS }, HammerIcon))
-  // The router Session's row carries the way into the page listing the Sessions it started.
-  ctx.slots.inject('sidebar.workspaces.session.row.action', () => ctx.slots.register({
-    name: 'sidebar.workspaces.session.row.action', id: 'dsh-superagent-sessions', order: 150, locale: NS,
-    inject: () => ({ open: () => { ctx.layout.selectPanel(PANEL_ID); askPage('sessions') } }),
-  }, TrackedSessionButton))
+  // Beside 对话 and 轨迹: the Tickets this Session tracks, and the way to each of their executor Sessions.
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+    name: 'conversation.view', id: 'dsh-superagent-tracked', order: 100, label: () => t('viewTracked'), locale: NS,
+    inject: () => ({ open: async (session: string) => {
+      try {
+        await openKnownSession(ctx.sessions, session as SessionId, target => { ctx.uiWorkspace.openSession(target) }, new AbortController().signal)
+      } catch (error) {
+        if (error instanceof SessionNavigationError) throw new Error(t(error.code === 'not-ready' ? 'sessionListNotReady' : 'sessionNotListed'))
+        throw error
+      }
+    } }),
+  }, (props: { sessionId: string; t: T; open: (session: string) => Promise<void> }) =>
+    <TrackedTasks sessionId={props.sessionId} t={props.t} open={props.open} />))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))
 }

@@ -348,7 +348,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/views/text.ts` | The two forms of a view's text: `preview`, plain text on one line, and `markdown` without HTML; `plain` and `readable` |
 | `src/app/views/records.ts` | The rows the views share: Triggers, Tickets, Threads, Decisions and Channel links, and `ownersOf`, the owners of follow-ups as one request reads them |
 | `src/app/views/tickets.ts` | The Ticket lists by stage, a Ticket's page, the Mandate basis facts and the Executor's load |
-| `src/app/views/sessions.ts` | The Session list behind the Sessions page: the router's Session and one executor Session per Ticket that started an Assignment |
+| `src/app/views/sessions.ts` | The Session list behind the 跟踪 view: the router's Session and one executor Session per Ticket that started an Assignment |
 | `src/app/views/threads.ts` | The Thread lists, a Thread's timeline, the search and the Decision list |
 | `src/app/views/sources.ts` | The Source status: each Source instance's state, its last day's counts, and what it filtered and dropped in that day |
 | `src/app/views/settings.ts` | The settings page's view: each block with its revision, each Source's settings with its kind's form, and the execution environment |
@@ -382,8 +382,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
 | `src/client/route.ts` | The tabs, the settings groups, the typed routes that `parseRoute` reads, and the route memory with the settings group opened last |
-| `src/client/focus.ts` | The page a sidebar Session row action asks the panel for, kept until the panel is mounted |
-| `src/client/sessions.tsx` | The Sessions page, and the hover button on the router Session's sidebar row that opens it |
+| `src/client/tracked.tsx` | The 跟踪 view registered beside 对话 and 轨迹: the Tickets the router Session tracks, and on an executor Session the one it works on with the way back |
+| `src/client/slots.d.ts` | The host's `conversation.view` slot declared for the type checker, because the package that owns it is not a dependency of this plugin |
 | `src/client/overview.tsx` | The overview |
 | `src/client/source.tsx`, `trigger.tsx`, `eval.tsx`, `execution.tsx`, `workspaces.tsx` | One file per stage: its status, and its settings where it has some; the Workspaces of the Execution settings, whose ids a new row derives from its name |
 | `src/client/thread.tsx`, `ticket.tsx` | The record pages: a Thread with its timeline, and a Ticket with its authorization, Inputs and Assignments |
@@ -444,9 +444,10 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |
-| `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx`, `panel-workspaces.spec.tsx`, `panel-sessions.spec.tsx` | Each page of the panel, including the Workspaces a Ticket can run in and the Sessions the router tracks, against a fake management API answered by route |
+| `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx`, `panel-workspaces.spec.tsx` | Each page of the panel, including the Workspaces a Ticket can run in, against a fake management API answered by route |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
-| `tests/sessions.spec.ts` | The Session list of the Sessions page: the Tickets that have a Session, and how an ended one reads |
+| `tests/sessions.spec.ts` | The Session list behind the 跟踪 view: the Tickets that have a Session, and how an ended one reads |
+| `tests/tracked.spec.tsx` | The 跟踪 view: the router's Tickets, an executor Session's one Ticket with the way back, a foreign Session, and a failed navigation |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |
 | `tests/locales.spec.ts`, `tests/styles.spec.ts` | The copy in both languages, the stylesheet |
 | `tests/class-docs.spec.ts` | Every class in `src` has a JSDoc block before it |

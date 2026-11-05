@@ -37,10 +37,8 @@
 .dt-open:focus-visible::after { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 .dt-row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption); overflow-wrap: anywhere; }
 .dt-row-quote { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Hover button on a sidebar Session row: opens the page listing the Sessions the router started. */
-.dt-session-action { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
-.dt-session-action:hover { background: var(--dsw-alias-fill-secondary, rgba(0, 0, 0, 0.06)); color: var(--dsw-alias-label-primary); }
-.dt-session-action:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+/* The 跟踪 view inside the Conversation area: the Tickets a Session tracks. */
+.dt-tracked { gap: 10px; padding: 16px; overflow: auto; }
 .dt-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 /* Transparent block borders preserve vertical spacing when line clamping clips padding. */
 .dt-banner:is(.dt-clamp, .dt-clamp-8) { padding-block: 0; border-block: 8px solid transparent; }
