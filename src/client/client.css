@@ -38,7 +38,7 @@
 .dt-row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption); overflow-wrap: anywhere; }
 .dt-row-quote { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The 跟踪 view inside the Conversation area: the Tickets a Session tracks. */
-.dt-tracked { gap: 10px; padding: 16px; overflow: auto; }
+.dt-tracked { display: flex; flex-direction: column; gap: 10px; padding: 16px; overflow: auto; }
 .dt-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 /* Transparent block borders preserve vertical spacing when line clamping clips padding. */
 .dt-banner:is(.dt-clamp, .dt-clamp-8) { padding-block: 0; border-block: 8px solid transparent; }
