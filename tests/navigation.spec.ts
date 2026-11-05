@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { openKnownSession } from '../src/navigation.ts'
+import { openKnownSession, openTrackedSession } from '../src/navigation.ts'
 import { initialLocation, parseRoute, remember, setupPage } from '../src/client/route.ts'
 const id = 'orchestrator-test' as SessionId
 function fixture(ready = false) {
@@ -38,6 +38,21 @@ it('does not navigate after the panel unmounts or a newer request supersedes it'
   const navigation = openKnownSession(sessions, id, open, controller.signal)
   controller.abort(); state.phase = 'ready'; state.byId[id] = {}; pending.resolve()
   await expect(navigation).resolves.toBe(false); expect(open).not.toHaveBeenCalled()
+})
+it('restores an archived Session before opening it, so a finished Ticket shows its own conversation', async () => {
+  const { sessions } = fixture(true)
+  const opened = vi.fn()
+  const workspace = { unarchiveSession: vi.fn(async () => {}), openSession: opened }
+  await expect(openTrackedSession(workspace, sessions, id, new AbortController().signal)).resolves.toBe(true)
+  expect(workspace.unarchiveSession).toHaveBeenCalledExactlyOnceWith(id)
+  expect(workspace.unarchiveSession.mock.invocationCallOrder[0]).toBeLessThan(opened.mock.invocationCallOrder[0]!)
+})
+it('opens the Session even when the Host refuses the restore', async () => {
+  const { sessions } = fixture(true)
+  const opened = vi.fn()
+  const workspace = { unarchiveSession: vi.fn(async () => { throw new Error('unknown session') }), openSession: opened }
+  await expect(openTrackedSession(workspace, sessions, id, new AbortController().signal)).resolves.toBe(true)
+  expect(opened).toHaveBeenCalledExactlyOnceWith(id)
 })
 it('reopens the page this tab showed last, and the overview for a route that no longer exists', () => {
   remember({ route: { page: 'eval', query: { filter: 'stop' } }, stack: [{ page: 'overview' }] })

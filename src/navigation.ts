@@ -10,6 +10,28 @@ export class SessionNavigationError extends Error {
   constructor(readonly code: 'not-ready' | 'not-listed') { super(code) }
 }
 
+/** The part of the workspace capability that opening a Session needs. */
+export interface SessionOpener {
+  /** Restore an archived Session; a Session that is not archived is left as it is. */
+  unarchiveSession(sessionId: SessionId): Promise<void>
+  /** Select a Session as the main view. */
+  openSession(target: SessionId): void
+}
+
+/**
+ * Select `id`, restoring it first when the Host holds it archived: an archived Session cannot become the main view —
+ * the Host clears the selection into a New Session the moment one does — and a Ticket's Session is archived when the
+ * Ticket ends, so opening a finished Ticket would otherwise show an empty conversation.
+ */
+export async function openTrackedSession(workspace: SessionOpener, sessions: Pick<ISessions, 'list' | 'refresh'>, id: SessionId, signal: AbortSignal): Promise<boolean> {
+  try {
+    await workspace.unarchiveSession(id)
+  } catch {
+    /* not archived, gone, or a Host build without the restore: the open reports what it finds */
+  }
+  return openKnownSession(sessions, id, target => { workspace.openSession(target) }, signal)
+}
+
 /** Select `id` in the workspace once the catalog lists it, unless aborted first. */
 export async function openKnownSession(sessions: Pick<ISessions, 'list' | 'refresh'>, id: SessionId, open: (id: SessionId) => void, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return false

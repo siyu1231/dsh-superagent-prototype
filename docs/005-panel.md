@@ -27,6 +27,8 @@ The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, *
 
 DeepSeek Harness gives every Session a header with its views; dsh-superagent registers **跟踪** (Tracked) beside **对话** and **轨迹**. On the router Session it lists every Ticket that Session accepted, each with the Workspace it ran in, its state and its directory, and **Open** switches to that Ticket's executor Session. On an executor Session the same view shows the one Ticket it works on and **打开主会话** returns to the router. The view is the plugin's own, so it appears in every Session header, and says so when the Session is not one of the plugin's.
 
+A finished Ticket's Session is archived when the Ticket ends, and DeepSeek Harness will not show an archived Session as the main view — selecting one clears the view into a New Session instead. **Open** therefore restores the Session before it opens it, so a finished Ticket shows the conversation that ran, and the Session returns to the sidebar where it belongs.
+
 A dropped message links to its Ticket, or to its Thread when it has no Ticket. The Source page explains whether its conversation disappeared or the Source stopped listening to it.
 
 A human follow-up still owned by an Executor is marked **Delivered to Ticket**, without an Eval. The Thread also shows hand-back reasons and context-only Subscriptions. **Evaluate again** can send that follow-up to Eval, or retry a Trigger with no effective judgement: one filtered by its Source, an unavailable Eval, or a delivered message with neither a non-stop Decision nor an Executor acknowledgement.

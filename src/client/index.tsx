@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { PluginConfigViewProps } from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { openKnownSession, SessionNavigationError } from '../navigation.ts'
+import { openTrackedSession, SessionNavigationError } from '../navigation.ts'
 import { App } from './app.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
@@ -36,7 +36,7 @@ function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
     pending.current?.abort()
     const request = new AbortController(); pending.current = request
     try {
-      await openKnownSession(ctx.sessions, id as SessionId, target => { ctx.uiWorkspace.openSession(target) }, request.signal)
+      await openTrackedSession(ctx.uiWorkspace, ctx.sessions, id as SessionId, request.signal)
     } catch (error) {
       if (error instanceof SessionNavigationError) throw new Error(t(error.code === 'not-ready' ? 'sessionListNotReady' : 'sessionNotListed'))
       throw error
@@ -59,7 +59,7 @@ export function apply(ctx: ClientContext): void {
     name: 'conversation.view', id: 'dsh-superagent-tracked', order: 100, label: () => t('viewTracked'), locale: NS,
     inject: () => ({ open: async (session: string) => {
       try {
-        await openKnownSession(ctx.sessions, session as SessionId, target => { ctx.uiWorkspace.openSession(target) }, new AbortController().signal)
+        await openTrackedSession(ctx.uiWorkspace, ctx.sessions, session as SessionId, new AbortController().signal)
       } catch (error) {
         if (error instanceof SessionNavigationError) throw new Error(t(error.code === 'not-ready' ? 'sessionListNotReady' : 'sessionNotListed'))
         throw error
