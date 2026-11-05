@@ -10,6 +10,7 @@ import { key, liveTicket, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { sameDirectory } from '../infra/environment.ts'
+import { historyView } from './views/history.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
 import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
@@ -258,8 +259,11 @@ export class Sessions {
   private async adopt(agent: Agent): Promise<boolean> {
     const header = agent.session.header as { cwd?: string; createdAt?: number; title?: string } | undefined
     if (!header || typeof header.cwd !== 'string' || typeof header.createdAt !== 'number') return false
-    if (header.createdAt < this.host.startedAt) return false
     if (!sameDirectory(header.cwd, this.host.routerDirectory)) return false
+    // A Session created before this process started is only taken when it never got an answer: an
+    // existing conversation keeps its transcript and must not become the router by being reopened.
+    const answered = historyView(agent.id)?.entries.some(entry => entry.kind === 'said') ?? false
+    if (header.createdAt < this.host.startedAt && answered) return false
     try {
       if (!await this.host.adoptRouter(agent.id, header.title?.trim() || 'dsh-superagent orchestrator')) return false
     } catch (error: unknown) {

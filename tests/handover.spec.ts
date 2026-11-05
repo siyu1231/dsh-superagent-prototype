@@ -1,6 +1,9 @@
 // The briefing a successor router Session receives when its predecessor hands over, and the pointer that moves with it.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { zstdCompressSync } from 'node:zlib'
 import type { Decision, Ticket } from '../src/core/index.ts'
 import { handoverText, type Handover } from '../src/app/handover.ts'
 import { startRuntime, type Host } from './fixtures/host.ts'
@@ -67,6 +70,31 @@ afterEach(async () => { await h.stop() })
 /** Every message DSH delivered to a Session, the briefing included. */
 const sent = (session: string) => h.deliveries.mock.calls.map(([call]) => call).filter(call => call.sessionId === session)
 
+/**
+ * Points DSH_HOME at a temporary home holding one answered Session log, so the plugin reads that
+ * Session as a conversation somebody already replied in. Returns the undo.
+ */
+const answeredLog = (session: string): (() => void) => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-handover-'))
+  const directory = join(home, 'sessions', '--chat--', session)
+  mkdirSync(directory, { recursive: true })
+  const now = Date.now()
+  const events = [
+    { type: 'session', version: 4, id: session, createdAt: now - 60_000, cwd: join(home, 'chat') },
+    { type: 'user/message', seq: 1, time: now - 59_000, data: { id: 'u1', role: 'user', content: [{ type: 'text', text: 'Hello' }] } },
+    { type: 'assistant/message', seq: 2, time: now - 58_000, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'Hi there' }] } } },
+  ]
+  writeFileSync(join(directory, 'session.v4.jsonl.zstd'),
+    Buffer.concat(events.map(event => zstdCompressSync(Buffer.from(JSON.stringify(event))))))
+  const previous = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  return () => {
+    if (previous === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previous
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
+}
+
 it('hands router duty to a successor Session that starts from a briefing of what the deployment holds', async () => {
   const previous = h.runtime.masterId
   const result = await h.runtime.handOver('the context grew long')
@@ -100,12 +128,24 @@ it('takes router duty when a person starts a Session in the router directory', a
 })
 
 it('leaves the Session on duty alone when an older Session in the router directory is opened again', async () => {
+  const restore = answeredLog('chat-old')
+  try {
+    const previous = h.runtime.masterId
+    const agent = await h.controller.create({ sessionId: 'chat-old', createdAt: Date.now() - 60_000 }) as unknown as { id: string }
+    h.ctx.emit('agent/created', { agent: h.agents.get(agent.id) } as never)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(h.runtime.masterId).toBe(previous)
+    expect(sent('chat-old')).toEqual([])
+  } finally { restore() }
+})
+
+it('takes router duty in an older Session that never got an answer', async () => {
   const previous = h.runtime.masterId
-  const agent = await h.controller.create({ sessionId: 'chat-old', createdAt: Date.now() - 60_000 }) as unknown as { id: string }
+  const agent = await h.controller.create({ sessionId: 'chat-idle', createdAt: Date.now() - 60_000 }) as unknown as { id: string }
   h.ctx.emit('agent/created', { agent: h.agents.get(agent.id) } as never)
-  await new Promise(resolve => setTimeout(resolve, 50))
-  expect(h.runtime.masterId).toBe(previous)
-  expect(sent('chat-old')).toEqual([])
+  await vi.waitFor(() => expect(sent('chat-idle').some(call => call.text.includes('# Router handover'))).toBe(true))
+  expect(h.runtime.masterId).toBe('chat-idle')
+  expect(previous).not.toBe('chat-idle')
 })
 
 it('does not take router duty for a Session started outside the router directory', async () => {
