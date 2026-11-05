@@ -133,6 +133,10 @@ function Header({ masterId }: { masterId: string | undefined }) {
         onClick={() => setGlossary(true)} />
       <Button variant="outline" size="sm" icon={<Icon name="session" size={14} />} disabled={!masterId}
         onClick={() => { if (masterId) openSession(masterId).catch(failure => notify(errorText(failure))) }}>{t('openMaster')}</Button>
+      <Button variant="outline" size="sm" icon={<Icon name="plus" size={14} />} title={t('newRouterHint')}
+        onClick={() => {
+          call('POST router/handover', { body: {} }).then(result => openSession(result.session)).catch(failure => notify(errorText(failure)))
+        }}>{t('newRouter')}</Button>
     </div>
     <Glossary open={glossary} onClose={() => setGlossary(false)} />
   </header>

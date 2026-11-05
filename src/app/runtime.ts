@@ -28,6 +28,7 @@ import { Store } from './store.ts'
 import { evalsHealth } from './views/overview.ts'
 import { TextCache } from './cache.ts'
 import { Effects } from './effects.ts'
+import { handoverText } from './handover.ts'
 import { Prompts } from './prompts.ts'
 import { registerHttp, type HttpHost } from './http.ts'
 import type { LinkTarget } from './views/records.ts'
@@ -77,7 +78,10 @@ export class Runtime extends Service implements SourceHost {
   readonly ready: Promise<void>
   private readonly board = new HealthBoard()
   private readonly runtimeHealth = this.board.claim('runtime', { state: 'starting', detail: '' })
-  readonly masterId: string
+  /** The Session on router duty; it changes when a router hands over to a successor. */
+  private master = ''
+  /** Router turns in progress, so two callers cannot start two successors at once. */
+  private handingOver?: Promise<{ previous: string; session: string }>
   private readonly sourceLinks = new TextCache(200_000)
   private readonly stopped = new AbortController()
   private readonly disposers: (() => void)[] = []
@@ -111,8 +115,10 @@ export class Runtime extends Service implements SourceHost {
         ? environmentOf({ deployment: setup.deployment, sources: this.sources, settings: store.settings() }) : undefined
       const feishu = () => setup.configured() && !!setup.deployment.feishu
       const prompts = this.prompts = new Prompts(store, () => machine.promptMaxChars.get(), deployed, feishu)
-      const masterId = this.masterId = store.get(KV.runtime.masterId) ?? `orchestrator-${key(machine.stateDir)}`
+      const masterId = this.master = store.get(KV.runtime.masterId) ?? `orchestrator-${key(machine.stateDir)}`
       store.set(KV.runtime.masterId, masterId)
+      // The name a successor is derived from: `orchestrator-<state>`, with the handover count kept beside it.
+      store.set(KV.runtime.routerBase, store.get(KV.runtime.routerBase) ?? masterId)
       const commands = this.commands = new Commands(() => setup.deployment, setup.commandEnvironment, this.lifetime)
       const board = this.board
       const effects = this.effects = new Effects(store, board)
@@ -125,11 +131,11 @@ export class Runtime extends Service implements SourceHost {
       const links: LinkHost = { store, links: this.sourceLinks, commands, sources, lifetime: this.lifetime }
       const link = (trigger: Trigger, signal?: AbortSignal) => sourceLink(links, trigger, signal)
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
-      const resources: ResourceHost = { store, pages: new TextCache(4_000_000), prompts, commands, masterId, context: ctx,
+      const resources: ResourceHost = { store, pages: new TextCache(4_000_000), prompts, commands, get masterId() { return runtime.masterId }, context: ctx,
         promptVersion: id => this.sessions.promptVersion(id), mayRead: (id, revision) => this.sessions.mayRead(id, revision),
         feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link }
-      const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'), masterId,
-        lifetime: this.lifetime,
+      const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'),
+        get masterId() { return runtime.masterId }, lifetime: this.lifetime,
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
@@ -140,7 +146,7 @@ export class Runtime extends Service implements SourceHost {
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
-        deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
+        deliver: (id, text) => sessions.prompt(runtime.masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
       const outbox = this.outbox = new Outbox({ store, effects, sources, commands, paused: () => this.paused() })
       const { assessor, executor } = this
       const policy = () => settingsPolicy(store.settings(), sources)
@@ -175,6 +181,7 @@ export class Runtime extends Service implements SourceHost {
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
+        router: { handOver: (reason: string) => this.handOver(reason) },
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }
@@ -186,6 +193,8 @@ export class Runtime extends Service implements SourceHost {
     }
   }
   get health(): Readonly<Record<string, Health>> { return this.board.all }
+  /** The Session on router duty: candidates, reports, relays and notices reach it, and it is the one the panel opens. */
+  get masterId(): string { return this.master }
   /** Aborted when dsh-superagent stops or loses its state directory lock, cancelling running reads and subprocesses. */
   get lifetime(): AbortSignal { return this.stopped.signal }
   context(kind: { kind: string; health: readonly string[] }): SourceContext { return sourceContextOf(this.sourceDeps, kind) }
@@ -206,6 +215,43 @@ export class Runtime extends Service implements SourceHost {
     return ticketEnvironment({ deployment, sources, settings: this.store.settings(), ticket, ...trigger ? { trigger } : {} })
   }
   checkSetup(): void { this.setup.check() }
+  /**
+   * Hand router duty to a successor Session. A router's context only grows, so it starts a new Session that begins from a
+   * briefing of what the deployment holds (open tickets, waiting candidates, recent decisions, policy), the predecessor stops
+   * receiving anything, and the candidates it had not decided are delivered again to the successor. Callers that ask at the
+   * same time share one handover.
+   */
+  handOver(reason: string): Promise<{ previous: string; session: string }> {
+    this.runtimeHealth.set({ state: 'ready', detail: `Router handover: ${reason}`, at: now() })
+    return this.handingOver ??= this.handover().finally(() => { this.handingOver = undefined })
+  }
+  private async handover(): Promise<{ previous: string; session: string }> {
+    const previous = this.masterId
+    const base = this.store.get(KV.runtime.routerBase) ?? previous
+    const epoch = (this.store.get(KV.runtime.routerEpoch) ?? 0) + 1
+    const session = `${base}-${epoch}`
+    await this.sessions.ensure(session, this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
+    this.master = session
+    this.store.set(KV.runtime.masterId, session)
+    this.store.set(KV.runtime.routerEpoch, epoch)
+    const policy = settingsPolicy(this.store.settings(), this.sources)
+    const text = handoverText({
+      session, previous, at: now(), policyVersion: policy.version, paused: policy.paused,
+      sources: this.sources.instances().filter(instance => instance.enabled).map(instance => {
+        const entry = this.health[instance.kind]
+        return { name: instance.kind, state: entry?.state ?? 'unknown', detail: entry?.detail ?? '' }
+      }),
+      tickets: this.store.tickets.open(),
+      waiting: this.store.threads.active().flatMap(thread => thread.evaluating
+        ? [{ thread: thread.key, strength: thread.evaluating.strength, since: thread.evaluating.startedAt, triggers: thread.evaluating.triggerIds.length }]
+        : []),
+      decisions: this.store.read.recentDecisions(0, 12),
+    })
+    await this.sessions.prompt(session, `handover:${session}`, text, 'queue')
+    // The predecessor's undecided candidates belong to the successor: its Session never decided them.
+    this.engine.redeliver()
+    return { previous, session }
+  }
   receive(trigger: Trigger): ReceiveResult { return this.passes.receive(trigger) }
   idle(): Promise<void> { return this.passes.idle() }
   pump(): Promise<void> { return this.passes.pump() }
@@ -245,8 +291,9 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
-    return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks,
+    const { store, sources, prompts, sessions, settings, engine, executor, health, machine, ready, sourceLinks, setup, passes } = this
+    return { store, sources, prompts, sessions, settings, engine, executor, health, machine, get masterId() { return runtime.masterId }, ready, sourceLinks,
+      router: { handOver: (reason: string) => runtime.handOver(reason) },
       workspaces: this.ctx.workspaceRegistry,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },

@@ -321,10 +321,11 @@ export class Sessions {
    * it is.
    */
   private limitSubagent(agent: Agent): void {
-    let parent = agent.session.header.parentSession
+    // A Session without a header has no known parent, so it is not one of the Executor's subagents.
+    let parent = (agent.session.header as { parentSession?: string } | undefined)?.parentSession
     // Up the subagents' parents to the worker, which are loaded while their subagents run.
     for (let depth = 0; parent !== undefined && ticketOfSession(parent) === undefined && depth < 8; depth++) {
-      parent = this.ctx.agents.get(parent)?.session.header.parentSession
+      parent = this.ctx.agents.get(parent as SessionId)?.session.header.parentSession
     }
     const ticketId = parent === undefined ? undefined : ticketOfSession(parent)
     if (ticketId === undefined || !this.host.store.tickets.get(ticketId)) return

@@ -91,3 +91,11 @@ it('shows the answer to the latest search only', async () => {
   await act(async () => { release() }); await settle()
   expect(all('.dt-search-results .dt-row-title').map(title => title.textContent)).toEqual(['new message'])
 })
+
+it('hands router duty to a new Session from the header, and opens it', async () => {
+  await mount()
+  await click(zh.newRouter)
+  await settle()
+  expect(server.handovers).toEqual([''])
+  expect(server.opened).toContain('orchestrator-test-1')
+})

@@ -54,6 +54,21 @@ export class Evals extends EnginePart {
     this.repo.threads.save(thread)
   }
   /**
+   * Hand every Eval that waits for its Session to the assessor again, after the Session on router duty was replaced: the
+   * successor receives the candidates its predecessor never decided, with their deadlines counting from now.
+   */
+  redeliver(): void {
+    const policy = this.options.policy()
+    for (const thread of this.repo.threads.active()) {
+      const evaluation = thread.evaluating
+      if (!evaluation) continue
+      delete evaluation.delivered
+      evaluation.deadline = new Date(Date.parse(this.now()) + policy.evalTimeoutMs).toISOString()
+      this.repo.threads.save(thread)
+      this.options.assessor.request(this.candidateOf(thread))
+    }
+  }
+  /**
    * An Eval past its deadline queues its Triggers again for a fresh Eval, up to `REQUEUES` times in a row, so a busy
    * assessor does not drop requests; after that it is recorded unavailable.
    */

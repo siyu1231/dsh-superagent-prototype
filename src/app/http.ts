@@ -46,6 +46,8 @@ export interface HttpHost {
   /** DSH's Workspace list: the working directories the panel offers, and where a bound directory is registered. */
   readonly workspaces: WorkspaceRegistry
   readonly masterId: string
+  /** Puts a successor Session on router duty: it starts from a briefing, and the predecessor stops receiving work. */
+  readonly router: { handOver(reason: string): Promise<{ previous: string; session: string }> }
   /** Resolves once startup finishes or setup determines what is still missing. */
   readonly ready: Promise<void>
   /** Resolved deployment; throws if read while waiting for setup (`!configured()`). */
@@ -229,6 +231,10 @@ function routes(runtime: HttpHost): Routes {
     'GET policy/history': () => policyHistory(store, runtime.sources, policyVersion(store.settings())),
     'POST policy-sync/:id': async ({ params }) => ({ policy: await runtime.settings.sync(params.id) }),
     'POST setup/check': () => { runtime.checkSetup(); return { restarting: true } },
+    'POST router/handover': async ({ body }) => {
+      const request = z.object({ reason: z.string().trim().max(300) }).partial().strict().parse(await body().catch(() => ({})))
+      return runtime.router.handOver(request.reason ?? 'requested from the panel')
+    },
     'GET models': () => runtime.models(),
     'GET prompts': ({ query }) => { const { revision, offset } = PromptsQuery.parse(query); return promptsView(runtime, revision, offset) },
     'PUT prompts': async input => {

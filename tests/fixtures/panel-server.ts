@@ -112,6 +112,8 @@ export interface PanelServer {
   form?: ConfigForm<Record<string, unknown>> | undefined
   opened: string[]
   dropped: DroppedReply[]
+  /** Reasons the panel gave when it handed router duty to a successor Session. */
+  handovers: string[]
   failing: Extract<Problem, { kind: 'outgoing' }>['outgoing'][]
   /** Workspaces DSH itself lists, which the panel offers beside the bound ones. */
   workspaces: ApiResponse<'GET workspaces'>['workspaces']
@@ -256,7 +258,7 @@ function initial(): PanelServer {
     en: 'Feishu message' } }
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
-    health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
+    health: {}, down: false, pending: 0, opened: [], handovers: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
     workspaces: [{ id: 'w1', path: '/srv/apps/web', title: 'Web app', sessions: 0 },
       { id: 'w2', path: '/srv/docs', title: 'Docs site', sessions: 2 }],
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
@@ -322,6 +324,10 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET workspaces': { answer: () => ({ workspaces: server.workspaces }) },
   'GET sessions': { answer: () => ({ master: 'orchestrator-test', sessions: server.sessions }) },
   'GET sessions/:session/history': { answer: request => ({ session: request.params.session, entries: server.sessionLog }) },
+  'POST router/handover': { body: true, answer: request => {
+    server.handovers.push(request.body?.reason ?? '')
+    return { previous: 'orchestrator-test', session: `orchestrator-test-${server.handovers.length}` }
+  } },
   'POST sources/:id/labels': { answer: () => {
     // Label refresh failures come from the bot CLI and are returned verbatim.
     if (server.joinError) return refuse(500, server.joinError)

@@ -29,8 +29,11 @@ export const KV = {
   prompts: { revision: record<number>('prompt-revision'), version: family<PromptVersion, [revision: number]>('prompt-version:'),
     /** The built-in text of a prompt part an override was edited from, by its `base`, which shows what an upgrade changed. */
     builtIn: family<string, [base: string]>('prompt-built-in:') },
-  /** Runtime: the main Session's ID. */
-  runtime: { masterId: record<string>('master-id') },
+  /**
+   * Runtime: the Session currently on router duty, the name it derives its successors from, and how many successors it has
+   * had. A router hands over when its context grew too long: the successor is `<base>-<epoch>`.
+   */
+  runtime: { masterId: record<string>('master-id'), routerBase: record<string>('router-base'), routerEpoch: record<number>('router-epoch') },
   /** Sessions: prompt revisions each Session has worked under, ordered oldest first; the last entry (`.at(-1)`) is its active revision. */
   sessions: { prompts: family<number[], [session: string]>('session-prompts:') },
   /** Schema 11 migration: legacy main-Session queues imported into the effect table. */

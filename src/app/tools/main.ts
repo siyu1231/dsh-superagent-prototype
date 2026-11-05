@@ -26,6 +26,8 @@ export interface MainToolsHost {
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
   readonly assessor: Pick<MasterAssessor, 'context' | 'read' | 'decide'>
   readonly resources: ResourceHost
+  /** Starts a successor Session on router duty; it begins from a briefing, and this Session receives nothing new. */
+  readonly router: { handOver(reason: string): Promise<{ previous: string; session: string }> }
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
   sendReplies(): Promise<void>
@@ -172,6 +174,12 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
         const reason = host.engine.requestStatus(args.ticket_id) ? 'Asked the worker for a status report' : 'The worker is not waiting; nothing was sent'
         return routed(host, { reason, ticketId: args.ticket_id })
       },
+    }),
+    tool({
+      name: 'orchestrator_new_router',
+      description: 'Hand router duty to a new Session that starts from a briefing of the open tickets, the candidates still waiting, the recent decisions and the policy. Use it when this conversation has grown long enough to slow or bias routing; this Session stops receiving candidates, reports and notices, and keeps its history.',
+      schema: z.object({ reason: z.string().trim().min(1).max(300).describe('Why the handover is due, in one sentence.') }).strict(),
+      execute: async args => host.router.handOver(args.reason),
     }),
     tool({
       name: 'orchestrator_ticket_note',

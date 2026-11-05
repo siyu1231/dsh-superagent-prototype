@@ -99,6 +99,9 @@ const TEXT = {
   // Header, search, and tabs
   panel: ['Superagent', 'Superagent'],
   openMaster: ['打开主 Session', 'Open main Session'],
+  newRouter: ['新开编排会话', 'New router Session'],
+  newRouterHint: ['换一个会话继续编排：新会话只带未完成的工单、等待判断的候选和最近的决定，当前会话不再接收新消息。',
+    'Continue routing in a new Session: it starts from the open tickets, the waiting candidates and the recent decisions, and this one stops receiving work.'],
   pagesLabel: ['dsh-superagent 页面', 'dsh-superagent pages'],
   searchPlaceholder: ['搜索工单、线程、触发或链接', 'Search Tickets, Threads, Triggers or links'],
   searchLabel: ['搜索', 'Search'],

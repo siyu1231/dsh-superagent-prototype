@@ -138,6 +138,8 @@ export class Engine {
 
   /** The assessor delivered an Eval's candidate to its Session: the Eval's deadline counts from now. */
   candidateDelivered(evalId: string): void { this.repo.atomic(() => { this.evals.delivered(evalId, this.options.policy()) }) }
+  /** Hand every undecided Eval to the assessor again, after the Session on router duty was replaced. */
+  redeliver(): void { this.repo.atomic(() => { this.evals.redeliver() }) }
   /**
    * Queue a stored Trigger for a fresh Eval, such as a person's replay; returns false while an Eval holds it.
    * @throws UserError when the trigger is unknown.
