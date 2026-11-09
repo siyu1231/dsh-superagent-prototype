@@ -2,7 +2,7 @@
 
 # dsh-superagent（分支版）
 
-基于 [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype)（MIT，DeepSeek Harness Team）的分支。上游的核心设计保留：把事件变成工单、每张工单在自己的目录里干、回到原处答复。本分支在它之上做了 Windows 适配、多工作目录，以及让编排会话可以被换掉。
+基于 [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype)（MIT，DeepSeek Harness Agent Team）的分支。上游的核心设计保留：把事件变成工单、每张工单在自己的目录里干、回到原处答复。本分支在它之上做了 Windows 适配、多工作目录，以及让编排会话可以被换掉。
 
 > **仅供研究参考的原型，不是 DeepSeek 的正式产品。** 上游对自己的说明也是如此。在你自己的环境里使用前，请先审阅。
 
@@ -45,4 +45,4 @@
 
 ## 许可
 
-MIT，与上游一致。原始作品版权归 DeepSeek Harness Team；本分支的改动以同一许可发布。
+MIT，与上游一致。原始作品版权归 DeepSeek Harness Agent Team；本分支的改动以同一许可发布。

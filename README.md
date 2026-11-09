@@ -2,7 +2,7 @@ English | [简体中文](README.zh.md)
 
 # dsh-superagent (fork)
 
-A fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype) (MIT, DeepSeek Harness Team). The upstream design is kept: an agent that turns events into Tickets, works each Ticket in a directory of its own, and answers where it was asked. This fork adapts it to Windows and to many working directories, and gives the router Session a way to be replaced.
+A fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype) (MIT, DeepSeek Harness Agent Team). The upstream design is kept: an agent that turns events into Tickets, works each Ticket in a directory of its own, and answers where it was asked. This fork adapts it to Windows and to many working directories, and gives the router Session a way to be replaced.
 
 > **Research prototype, not an official DeepSeek product.** Upstream says the same about itself. Review it before using it in your own environment.
 
@@ -45,4 +45,4 @@ On Windows the deployment lives in its own DSH profile, so the plugin's process-
 
 ## License
 
-MIT, as upstream. Copyright for the original work belongs to the DeepSeek Harness Team; this fork's changes are published under the same licence.
+MIT, as upstream. Copyright for the original work belongs to the DeepSeek Harness Agent Team; this fork's changes are published under the same licence.
