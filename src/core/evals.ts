@@ -320,7 +320,8 @@ export class Evals extends EnginePart {
   /** Record an accept with the Mandate the Eval gives, and have Tickets create its ticket. */
   private accept(thread: Thread, evaluation: Evaluation, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>): Decision {
     const at = this.now()
-    const basis = { ...evaluation.basis, ...(outcome.rules ? { rules: outcome.rules } : {}) }
+    // A directory the router named travels with the Mandate, so the Executor runs the Ticket there.
+    const basis = { ...evaluation.basis, ...(outcome.rules ? { rules: outcome.rules } : {}), ...(outcome.workspace ? { scope: { ...(evaluation.basis.scope as Record<string, unknown> | undefined), workspace: outcome.workspace } } : {}) }
     const { strength, policyVersion, actor } = evaluation
     const mandate: Mandate = { strength, policyVersion, basis, actor, scope: outcome.scope }
     const ticketId = key('ticket', evaluation.id)

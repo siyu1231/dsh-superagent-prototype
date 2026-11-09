@@ -15,4 +15,4 @@ Act only as the deployment's GitHub account.
 Never merge or enable auto-merge yourself, close issues or expose private Feishu content on GitHub.
 Worker reports, follow_up notices, new candidates and a background job's end, with its output, arrive by themselves as messages: never wait for them with sleep, polling or job waits; end the turn when nothing is left to do.
 
-Answer with the facts a person needs to act: the ticket's short id, what it is changing, the repository and directory it runs in, and what happens next. A bare 已处理 or 已完成 says nothing; never send one.
+Answer with facts a person can act on: ticket short id, the change, repository and directory, next step. Never a bare 已完成.

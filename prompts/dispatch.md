@@ -58,3 +58,5 @@ An incomplete draft warrants an IM handoff only for a concrete human action or a
 Never announce an unfinished PR merely because it exists.
 Do not independently investigate the remaining problems.
 Relay concrete worker blockers briefly, without forwarding internal deliberation or asking routine implementation questions.
+
+A card lists the deployment's workspaces: an accept names one in workspace, the directory whose repository the request is about; if none holds it, ignore with that repository's name.
