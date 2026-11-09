@@ -480,10 +480,13 @@ export class DshExecutor implements Executor {
     const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)
     if (!current()) return
     const batch = told ? [] : batchOf(this.host, ticket).map(batchLine)
-    const body = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...retried })
+    // A directory with no repository: the worker changes files and reports, with nothing to push.
+    const local = workspaceOf(this.host.store.settings(), ticket)?.repository
+      ? undefined : 'No repository is bound to this directory: work in it and report what changed. Do not push or open a pull request.'
+    const body = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...(local ? { local } : {}), ...retried })
       : JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...(brief ? { assignment: brief } : {}),
         ...(read ? { assignment_chars: chars, assignment_read: read } : {}), ...(card ? { trigger: card } : {}),
-        ...(batch.length ? { batch } : {}), ...retried })
+        ...(batch.length ? { batch } : {}), ...(local ? { local } : {}), ...retried })
     const text = `${anchorOf(ticket, assignment)}\n${body}`
     const requestId = later ? `assignment:${ticket.id}:${assignment.id}` : first
     await this.host.sessions.prompt(sessionId, requestId, text, 'queue',

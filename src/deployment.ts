@@ -100,7 +100,8 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
   const bound = workspaces.filter(workspace => workspace.enabled && workspace.repository)
-  if (!remote && bound.length === 0) throw new SetupError('repositoryUnset')
+  // A directory alone is enough to work in: it needs no repository, and its Tickets report back without a pull request.
+  if (!remote && bound.length === 0 && !workspaces.some(workspace => workspace.enabled && workspace.directory)) throw new SetupError('repositoryUnset')
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string
   try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
