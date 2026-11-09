@@ -57,6 +57,13 @@ it('reads the Ticket envelope a worker opens with as its title and assignment', 
     .toBe('**Change "repositary" to "repository"**\n\nFix the README.')
 })
 
+it('reads past the anchor line every worker message opens with', () => {
+  const envelope = JSON.stringify({ ticket_id: 't1', title: 'Fix the typo', assignment: 'Correct "recieve".' })
+  const anchored = `[Ticket t1 "Fix the typo" · assignment 1/1 · stage working · last report none]\n${envelope}`
+  expect(historyView('worker-t1', home('worker-t1', [asked(anchored)]))?.entries[0]?.text)
+    .toBe('**Fix the typo**\n\nCorrect "recieve".')
+})
+
 it('leaves out a tool result for a call it never saw, and keeps the result out when none came', () => {
   const dir = home('worker-t1', [called('call-1', 'read', '{"path":"a"}'), result('call-2', 'orphan')])
   expect(historyView('worker-t1', dir)?.entries).toEqual([{ kind: 'tool', at: new Date(1_700_000_002_000).toISOString(), text: '',

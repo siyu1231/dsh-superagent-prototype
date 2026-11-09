@@ -99,11 +99,12 @@ function scaffold(text: string): boolean {
   return SCAFFOLD.test(text)
 }
 
-/** The first message of a worker is the Ticket envelope as JSON; its title and assignment read better than the JSON. */
+/** The first message of a worker is the anchor line, then the Ticket envelope as JSON; its title and assignment read better than the JSON. */
 function askedOf(text: string): string {
-  if (!text.startsWith('{')) return text
+  const body = text.startsWith('[Ticket ') ? text.slice(text.indexOf('\n') + 1) : text
+  if (!body.startsWith('{')) return text
   try {
-    const value: unknown = JSON.parse(text)
+    const value: unknown = JSON.parse(body)
     if (!value || typeof value !== 'object' || Array.isArray(value)) return text
     const ticket = value as { title?: unknown; assignment?: unknown; scope?: unknown }
     const title = typeof ticket.title === 'string' ? ticket.title : ''

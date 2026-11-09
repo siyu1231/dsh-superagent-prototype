@@ -273,8 +273,10 @@ function collect(host: Host, { a, b, workerA, workerB, refusal }: Awaited<Return
     surfaces.push({ where: `worker input assignment (${ticket.mandate.strength})`, owner: EXECUTOR, role: 'worker', text: assignment })
     const card = (text: string) => { try { return JSON.parse(text) as Record<string, unknown> } catch { return undefined } }
     for (const { text } of host.inputs.filter(input => input.sessionId === sessionId)) {
-      const input = ticket.inputs.find(item => item.kind === 'trigger' ? card(text)?.trigger_id === item.triggerId
-        : inputMessage(item) === text)
+      // The worker's message opens with the anchor line; what follows is the input as the plugin renders it.
+      const body = text.startsWith('[Ticket ') ? text.slice(text.indexOf('\n') + 1) : text
+      const input = ticket.inputs.find(item => item.kind === 'trigger' ? card(body)?.trigger_id === item.triggerId
+        : inputMessage(item) === body)
       if (!input) continue
       // Text inputs are named by their id prefix; the restart note's id is a content hash, so it is named by its text.
       const kind = input.kind === 'trigger' ? input.context ? 'trigger (context)' : 'trigger' : input.kind !== 'text' ? input.kind

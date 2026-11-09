@@ -264,7 +264,8 @@ export async function startRuntime(seed?: (store: Store) => void) {
 
   /** Parsed JSON payloads delivered to `sessionId`. */
   const relays = (sessionId: string) => deliveries.mock.calls.map(([call]) => call).filter(call => call.sessionId === sessionId)
-    .map(call => JSON.parse(call.text) as Record<string, unknown>)
+    // Every message to a worker opens with its anchor line; the body it precedes is the JSON these helpers read.
+    .map(call => JSON.parse(call.text.startsWith('[Ticket ') ? call.text.slice(call.text.indexOf('\n') + 1) : call.text) as Record<string, unknown>)
   const candidates = () => relays(runtime.masterId).filter(item => item.kind === 'candidate').map(item => item.trigger_id)
   const runTool = async (sessionId: string, name: string, args: unknown) => {
     const tool = tools.get(sessionId)?.get(name)

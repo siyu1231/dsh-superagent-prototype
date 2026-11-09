@@ -116,7 +116,9 @@ async function restart(machine: Partial<Machine> = {}, accounts: Accounts = {}):
 }
 let deliveries: ReturnType<typeof vi.fn<(request: { sessionId: string; mode: 'queue' | 'steer'; id: string; text: string }) => void>>
 const relays = (sessionId: string) => deliveries.mock.calls.map(([call]) => call).filter(call => call.sessionId === sessionId).map(call => {
-  try { return JSON.parse(call.text) as Record<string, unknown> } catch { return { text: call.text } as Record<string, unknown> }
+  // Every message to a worker starts with its anchor line; the tests read the body it precedes.
+  const body = call.text.startsWith('[Ticket ') ? call.text.slice(call.text.indexOf('\n') + 1) : call.text
+  try { return JSON.parse(body) as Record<string, unknown> } catch { return { text: call.text } as Record<string, unknown> }
 })
 const MEMBER = 'ou_alice'
 const CHAT = 'oc_team'
@@ -273,7 +275,19 @@ it('fans a person\'s later thread message out to the live worker as context and 
     .toMatchObject({ trigger_id: followup.id, around: { before: expect.objectContaining({ read: `trigger/${key('feishu', 'om_1')}` }) } })
 })
 
+it('opens every message to a worker with the Ticket, Assignment, stage and last report it is on', async () => {
+  const { ticket, sessionId } = await acceptedTicket()
+  const lines = () => deliveries.mock.calls.map(([call]) => call).filter(call => call.sessionId === sessionId).map(call => call.text.split('\n')[0]!)
+  expect(lines()[0]).toMatch(/^\[Ticket \S+ "修复回归" · assignment 1\/1 · stage working(?: · queued)? · last report none\]$/)
+  expect(lines()[0]).toContain(ticket.id)
+  deliveries.mockClear()
+  await receive(feishu('2', '顺手把标题也改一下', { mentions: [], root_id: 'om_1' }))
+  // The later input keeps the anchor, which is what survives the worker's transcript being folded.
+  expect(lines()[0]).toMatch(/^\[Ticket \S+ "修复回归" · assignment 1\/1 · stage working · last report none\]$/)
+})
+
 it('assesses a proactive observation in the orchestrator Session and creates the ticket only on a positive auto-mode decision', async () => {
+
   const observe = (mode: 'observe' | 'auto') => runtime.settings.save('eval', { ...runtime.store.settings().eval, mode }, runtime.store.blockRevision('eval'), 'panel')
   await observe('observe')
   const trigger = feishu('3', '这个文案好奇怪，改成“浏览网页”吧', { mentions: [] })

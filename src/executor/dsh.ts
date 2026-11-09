@@ -4,7 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
+import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, ticketStage, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
@@ -112,6 +112,25 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
 }
 /** Character limits for inline assignment and trigger text in worker messages; longer text is read via its resource. */
 const ASSIGNMENT_CHARS = 1500, TRIGGER_CHARS = 600
+/** Collapses whitespace and cuts `text` at `limit` characters, for the one line the anchor has room for. */
+const clip = (text: string, limit: number): string => {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length <= limit ? flat : `${flat.slice(0, limit)}…`
+}
+/**
+ * The line every message to a worker starts with: the Ticket it works on, which Assignment, where that Ticket stands, and
+ * what it last reported. A worker's transcript is folded by context compression, so each turn states this again from the
+ * store instead of relying on the worker to remember it.
+ */
+export function anchorOf(ticket: Ticket, assignment: Assignment): string {
+  const stage = ticketStage(ticket)
+  const where = stage.stage === 'person' ? `person · ${stage.action}`
+    : stage.stage === 'working' && stage.action ? `working · ${stage.action}` : stage.stage
+  const number = ticket.assignments.findIndex(item => item.id === assignment.id) + 1
+  const report = latestReport(ticket)
+  const last = report ? `${report.state}: ${clip(report.summary, 120)}` : 'none'
+  return `[Ticket ${ticket.id} "${clip(ticket.title, 60)}" · assignment ${number}/${ticket.assignments.length} · stage ${where} · last report ${last}]`
+}
 /** Returns `text` up to `limit` characters, or a truncated preview with total character count and the resource path to read the full text. */
 const capped = (text: string, limit: number, read: string) =>
   text.length <= limit ? { text } : { text: `${text.slice(0, limit)}…`, chars: text.length, read }
@@ -340,7 +359,8 @@ export class DshExecutor implements Executor {
     const trigger = input.kind === 'trigger' ? await this.triggerCard(ticket, input.triggerId, input.note) : undefined
     const message = inputMessage(input, trigger)
     if (message === undefined) return
-    const text = message.length > ASSIGNMENT_CHARS ? JSON.stringify(capped(message, ASSIGNMENT_CHARS, inputResource(ticket.id, input.id))) : message
+    const anchored = `${anchorOf(ticket, assignment)}\n${message}`
+    const text = anchored.length > ASSIGNMENT_CHARS ? JSON.stringify(capped(anchored, ASSIGNMENT_CHARS, inputResource(ticket.id, input.id))) : anchored
     await this.host.sessions.prompt(workerSessionId(ticket.id), input.id, text, 'steer', live)
   }
   /** Formats a trigger on `ticket` for the worker, including a preview of the replied-to message when the worker has not yet seen it. */
@@ -460,10 +480,11 @@ export class DshExecutor implements Executor {
     const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)
     if (!current()) return
     const batch = told ? [] : batchOf(this.host, ticket).map(batchLine)
-    const text = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...retried })
+    const body = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...retried })
       : JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...(brief ? { assignment: brief } : {}),
         ...(read ? { assignment_chars: chars, assignment_read: read } : {}), ...(card ? { trigger: card } : {}),
         ...(batch.length ? { batch } : {}), ...retried })
+    const text = `${anchorOf(ticket, assignment)}\n${body}`
     const requestId = later ? `assignment:${ticket.id}:${assignment.id}` : first
     await this.host.sessions.prompt(sessionId, requestId, text, 'queue',
       () => { if (!current()) throw new Error('Launch authorization changed before worker delivery') },

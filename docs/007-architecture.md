@@ -608,6 +608,8 @@ Other notices are injected without waking the main Session: `ticket_ended`, `set
 
 Workers receive assignments and Inputs inline. The first message includes the title, up to 1,500 characters of assignment text and the source Trigger card. Inputs carry a Trigger card with up to 600 characters and `replies_to`, or plain Input text. Read pointers appear only for truncated content.
 
+Every message to a worker opens with an anchor line, `[Ticket <id> "<title>" · assignment <n>/<total> · stage <stage> · last report <state>: <summary>]`, rendered from the store by `anchorOf` in `src/executor/dsh.ts`. A worker's transcript is folded by context compression, so each turn restates which Ticket and Assignment it is on, where that Ticket stands and what it last reported, instead of relying on the worker to remember. `historyView` strips the line when it renders a Session's conversation.
+
 ### Panel-only actions
 
 There is no tool for dismissing an unavailable Decision, rerunning setup, refreshing Source display names, or sending an Executor-owned human follow-up to Eval. The last action is deliberately refused by `orchestrator_trigger_requeue`. Other panel actions have equivalent tools.
