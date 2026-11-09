@@ -16,6 +16,7 @@ import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, policyVersion, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
+import { imKind, ROW as CHAT_ROW, SOURCE as CHAT } from '../sources/im.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, executionRoot, ticketEnvironment, type Variable } from './execution-environment.ts'
@@ -113,6 +114,7 @@ export class Runtime extends Service implements SourceHost {
       const report = (error: unknown) => { ctx.logger.warn('dsh-superagent: %s', String(error)) }
       const store = opened = this.store = new Store(join(machine.stateDir, 'orchestrator.sqlite'), report)
       migrateWorkspaces(store)
+      admitChats(store)
       includeWorkspaces(store, ctx.workspaceRegistry, machine)
       const setup = this.setup = new Setup({ context: ctx, machine, lifetime: this.lifetime, restart })
       const deployed = () => setup.configured()
@@ -132,6 +134,8 @@ export class Runtime extends Service implements SourceHost {
           .catch(() => { /* sync() records its failure in health. */ })
         return () => {}
       })
+      // The IM Source has no plugin of its own: the bridge relays chats into a Session and `Sessions.hear` records them.
+      sources.register(imKind)
       const links: LinkHost = { store, links: this.sourceLinks, commands, sources, lifetime: this.lifetime }
       const link = (trigger: Trigger, signal?: AbortSignal) => sourceLink(links, trigger, signal)
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
@@ -391,6 +395,29 @@ export function migrateWorkspaces(store: Pick<Store, 'blockRevision' | 'settings
   const sources = github ? { ...settings.sources, github: { ...github, config: { ...github.config, repository: '' } } } : settings.sources
   store.saveSettings({ ...settings, workspaces, sources },
     { source: 'internal', block: 'workspaces', policyVersion: policyVersion(settings), policyChanged: false, notified: [] })
+}
+
+/**
+ * Lets anyone who mentions the agent in a chat originate work: the `chat` row of the IM Source admits an unlisted sender
+ * who addresses the agent as an explicit request. Runs at every start and writes once, so a Policy edited later wins.
+ */
+export function admitChats(store: Pick<Store, 'settings' | 'saveSettings'>): void {
+  const settings = store.settings()
+  const part = settings.policy.sources[CHAT]
+  if (part?.admission?.[CHAT_ROW]?.unlistedAddressed) return
+  const policy = {
+    ...settings.policy,
+    sources: {
+      ...settings.policy.sources,
+      [CHAT]: {
+        ...part,
+        allowed: part?.allowed ?? [],
+        admission: { ...part?.admission, [CHAT_ROW]: { ...part?.admission?.[CHAT_ROW], unlistedAddressed: 'explicit' as const } },
+      },
+    },
+  }
+  store.saveSettings({ ...settings, policy },
+    { source: 'internal', block: 'policy', policyVersion: policyVersion(settings), policyChanged: false, notified: [] })
 }
 
 /**

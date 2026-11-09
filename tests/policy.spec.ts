@@ -5,6 +5,7 @@ import { migrateSettings } from '../src/app/migration.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
 import { githubKind } from '../src/sources/github.ts'
+import { imKind } from '../src/sources/im.ts'
 import type { Thread, Ticket, Trigger } from '../src/core/index.ts'
 
 const MEMBER = 'ou_alice'
@@ -18,7 +19,7 @@ const base = SettingsSchema.parse({
 })
 function setup(settings: Settings = base) {
   const sources = new SourceRegistry(() => settings)
-  sources.register(feishuKind); sources.register(githubKind)
+  sources.register(feishuKind); sources.register(githubKind); sources.register(imKind)
   return { sources, policy: settingsPolicy(settings, sources), version: policyVersion(settings) }
 }
 const { sources, policy } = setup()
@@ -63,6 +64,11 @@ describe('gate', () => {
     expect(allowedSender(base, { source: 'feishu', id: 'Alice' })).toBeUndefined()
     expect(anyoneAllowed(base)).toBe(true)
     expect(anyoneAllowed(SettingsSchema.parse({}))).toBe(false)
+  })
+  it('admits anyone who mentions the agent in a chat, once the IM row says so', () => {
+    const im = SettingsSchema.parse({ policy: { sources: { im: { admission: { chat: { unlistedAddressed: 'explicit' } } } } } })
+    const chat: Trigger = { id: 'im:1', source: 'im', threads: [{ source: 'im', id: 'group:oc_team' }], actor: { source: 'im', id: 'chat-participant' }, human: true, at: '', text: 'x', addressed: 'mention', meta: { conversation: 'group:oc_team' } }
+    expect(setup(im).policy.gate(chat, thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { via: 'admission', cell: 'unlistedAddressed', source: 'im' } })
   })
   it('assesses follow-ups on Threads with Tickets, explicit from an allowed sender and inferred from anyone else', () => {
     const quiet = { meta: { chatId: CHAT, direct: false, mentioned: false } }
