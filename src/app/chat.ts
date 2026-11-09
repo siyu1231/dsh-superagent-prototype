@@ -49,7 +49,9 @@ export function chatTrigger(
     id: 'im:' + conversation.conversationKey + ':' + session + ':' + turn,
     source: 'im',
     threads: [chatThread(conversation.conversationKey)],
-    actor: { source: 'im', id: conversation.senderId ?? 'unknown' },
+    // The bridge does not hand the sender over, so a chat message is attributed to the group: the chat admits anybody
+    // who mentions the agent there, and the Decision then names this identity rather than an unexplained "unknown".
+    actor: { source: 'im', id: conversation.senderId ?? 'chat-participant' },
     human: true,
     ...(conversation.addressed ? { addressed: conversation.addressed } : {}),
     at: isoTime(at),
