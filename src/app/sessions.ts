@@ -1,4 +1,4 @@
-﻿/** Lifecycle, prompt/tool/skill decoration, message delivery, and budget retry tracking for orchestrator and worker DSH sessions. */
+/** Lifecycle, prompt/tool/skill decoration, message delivery, and budget retry tracking for orchestrator and worker DSH sessions. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
@@ -173,6 +173,10 @@ export class Sessions {
       // duty, and it is still a request somebody wrote.
       const cwd = session.header?.cwd
       if (!cwd || !sameDirectory(cwd, this.host.routerDirectory)) return
+      // Only what a person wrote arrives with the host's own source kind. Our relayed cards, notices and worker reports
+      // are user messages too; recording them again would make the router answer itself forever.
+      const source = (data as { source?: { kind?: string } } | undefined)?.source?.kind
+      if (source && source !== 'user') return
       const bridge = (this.host.context as unknown as { reflect?: { get?: (name: string) => unknown } }).reflect?.get?.('dshIm') as ChatBridge | undefined
       const conversation = this.chatOf(session.id) ?? bridge?.describeConversationSync?.(session.id)
       if (!conversation?.conversationKey) return
