@@ -279,7 +279,26 @@ export class DshExecutor implements Executor {
         throw new PrepareFailed(`The prepare command failed: ${error instanceof Error ? error.message : String(error)}`)
       })
     await mkdir(directory, { recursive: true })
+    await this.trackChanges(ticket, directory)
     await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime)
+  }
+  /**
+   * Keeps a directory with no repository under version control anyway: a local git history is the only record of what a
+   * Ticket changed, and it makes an undo possible without a pull request. Runs in the Ticket's own directory, so one
+   * Ticket's history cannot see another's, and never touches a repository the prepare command cloned.
+   */
+  private async trackChanges(ticket: Ticket, directory: string): Promise<void> {
+    const settings = this.host.store.settings()
+    if (workspaceOf(settings, ticket)?.repository) return
+    const subprocess = this.host.context.subprocess
+    const signal = AbortSignal.any([this.host.lifetime, AbortSignal.timeout(PREPARE_TIMEOUT_MS)])
+    const run = (argv: string[]) => runAsWorker(subprocess, argv, directory, signal).catch(() => undefined)
+    // `rev-parse` answers non-zero outside a work tree, which is when this history starts.
+    const inside = await runAsWorker(subprocess, ['git', 'rev-parse', '--is-inside-work-tree'], directory, signal).catch(() => '')
+    if (inside.trim() === 'true') return
+    await run(['git', 'init'])
+    await run(['git', 'add', '-A'])
+    await run(['git', '-c', 'user.name=dsh-superagent', '-c', 'user.email=dsh-superagent@localhost', 'commit', '-m', `Before ${ticket.id}`, '--allow-empty'])
   }
   /** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */
   start(ticket: Ticket, assignment: Assignment): void {
@@ -482,7 +501,7 @@ export class DshExecutor implements Executor {
     const batch = told ? [] : batchOf(this.host, ticket).map(batchLine)
     // A directory with no repository: the worker changes files and reports, with nothing to push.
     const local = workspaceOf(this.host.store.settings(), ticket)?.repository
-      ? undefined : 'No repository is bound to this directory: work in it and report what changed. Do not push or open a pull request.'
+      ? undefined : 'No repository is bound to this directory: work in it, commit your change on the local git history it already has, and report the commit and git diff --stat. Do not push or open a pull request.'
     const body = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...(local ? { local } : {}), ...retried })
       : JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...(brief ? { assignment: brief } : {}),
         ...(read ? { assignment_chars: chars, assignment_read: read } : {}), ...(card ? { trigger: card } : {}),
