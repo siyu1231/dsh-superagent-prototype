@@ -27,7 +27,21 @@ A fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/
 
 **5. Sessions grouped and archived properly.** The plugin's Sessions belong to their DSH Workspace, so they no longer sit under 未分组; a finished Ticket's Session is archived, and opening it restores it instead of landing on an empty conversation.
 
-**6. Documentation.** A Chinese README, Windows notes in `SETUP.md`, and the numbered docs kept in step with the code (`003-execution.md`, `005-panel.md`, `007-architecture.md`).
+**6. An IM chat entrance next to the event Sources.** With [dsh-im](https://github.com/xmanrui/dsh-im) installed, a chat is bound to the router Session: messages arrive as turns, replies come back in the chat, and each message is still recorded as a Trigger of source `im` so deduplication, the admission table and Decision records keep working. Anyone who mentions the agent may originate work (the `im` Source's `chat` admission row admits `unaddressed` messages as explicit requests); the router judges by the rules as usual.
+
+**7. Working directories need no repository.** A folder alone is enough: setup no longer refuses a deployment whose directories are unbound, the router names the directory it wants on the Candidate card (`workspace`), and such a Ticket works in its own directory, commits to a local git history that the executor creates before the worker starts, and reports the commit and `git diff --stat` instead of pushing or opening a pull request.
+
+**8. Documentation.** A Chinese README, Windows notes in `SETUP.md`, and the numbered docs kept in step with the code (`003-execution.md`, `005-panel.md`, `007-architecture.md`).
+
+## What is not finished
+
+These are known gaps, recorded so they are not mistaken for working behaviour:
+
+- **A working directory is not itself versioned.** Each Ticket still gets its own clone (repository bound) or its own `git init` (unbound) inside `<working directory>/<ticket>`. The design the maintainers settled on — the working directory is the project's repository and every Ticket gets a `git worktree` and branch — is **not implemented**; doing it changes what "prepare" means, adds worktree cleanup, and needs a default prepare for unbound folders.
+- **Context compression leaves no mark in a Ticket's transcript.** The compression that folds a long conversation happens between DeepSeek Harness and the model: the stored log is complete and contains no compaction event, so the plugin cannot write the marker the design asks for. What it can do (and does) is read past its own turn scaffolding; the history view still hides `[Compressed conversation section` blocks, and showing a marker there instead is the remaining piece.
+- **No per-workspace routers.** Exactly one Session is on router duty for the whole deployment; splitting a router per working directory was considered and rejected in this fork.
+- **No Agent Team and no speculative execution.** A worker Session may start subagents, but there is no first-class team layer (roles, concurrency cap, aggregation protocol), and nothing runs before a Ticket exists, so "try it silently and discard on a wrong bet" is not implemented.
+- **No panel entry to create an unbound working directory.** Folders come from DSH's Workspace list (synced at start) or the panel's add-existing-directory action.
 
 ## Setup
 
