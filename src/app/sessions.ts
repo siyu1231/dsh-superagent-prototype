@@ -6,7 +6,8 @@ import { scopeParentOf } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { dirname } from 'node:path'
 import { z } from 'zod'
-import { key, liveTicket, type Ticket } from '../core/index.ts'
+import { key, liveTicket, type Ticket, type Trigger } from '../core/index.ts'
+import { chatTrigger, type Conversation } from './chat.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { sameDirectory } from '../infra/environment.ts'
@@ -41,12 +42,28 @@ export interface SessionsHost {
    * duty now; false when another handover moved the pointer first.
    */
   adoptRouter(sessionId: string, title: string): Promise<boolean>
+  /** Records a Trigger a person wrote in a chat, so it is admitted and decided like any other request. */
+  receive(trigger: Trigger): void
   readonly lifetime: AbortSignal
   closing(): boolean
   /** Execution environment variables for `ticket`, rendered into its worker's system prompt. */
   environment(ticket: Ticket): Variable[]
   /** Tools to register on the main Session (`ticket === undefined`) or on `ticket`'s worker Session. */
   tools(agent: Agent, ticket?: Ticket): Tool[]
+}
+
+/** The part of dsh-im the plugin reads: which chat a Session is bound to, if any. Absent when the profile has no bridge. */
+interface ChatBridge { describeConversationSync?(sessionId: string): Conversation | undefined }
+
+/** The text of a message's content parts, which is what a person typed. */
+function spoken(content: unknown): string {
+  if (!Array.isArray(content)) return ''
+  const parts: string[] = []
+  for (const part of content) {
+    const text = (part as { type?: unknown; text?: unknown } | undefined)?.type === 'text' ? (part as { text?: unknown }).text : undefined
+    if (typeof text === 'string' && text.length > 0) parts.push(text)
+  }
+  return parts.join('\n')
 }
 
 /**
@@ -123,6 +140,23 @@ export class Sessions {
     host.effects.handle('relay', ({ text }, requestId) => this.prompt(host.masterId, requestId, text, 'steer'), { ordered: true })
     host.effects.handle('notice', ({ value, summary }, name) => this.inject(name, value, summary), { ordered: true })
   }
+  /**
+   * Records one message written in a chat bound to the router Session. The IM bridge knows which chat a Session is
+   * talking to; when it cannot say (a Session opened in DSH's Web UI, a chat nobody bound), nothing is recorded and the
+   * conversation carries on unrecorded, as every Session did before the bridge existed.
+   */
+  private hear(session: SessionId, data: unknown): void {
+    try {
+      const bridge = (this.host.context as unknown as { get?: (name: string) => ChatBridge | undefined }).get?.('dshIm')
+      const conversation = bridge?.describeConversationSync?.(session)
+      if (!conversation?.conversationKey) return
+      const at = new Date().toISOString()
+      const trigger = chatTrigger(conversation, spoken((data as { content?: unknown } | undefined)?.content), at, session, Date.parse(at))
+      if (trigger) this.host.receive(trigger)
+    } catch {
+      // A chat message must still reach the router when recording it fails: the conversation is the person's answer.
+    }
+  }
   /** Subscribes to host agent and session events so newly created sessions are decorated and model-budget retries are reflected in health. Call once at startup. */
   install(): void {
     const ctx = this.ctx
@@ -131,6 +165,10 @@ export class Sessions {
       this.retryHealth.clear(agent.id); this.updateModelHealth()
     })
     ctx.on('session/event', (session, event) => {
+      // A message a person wrote in a chat the bridge bound to the router is a request like any other: record it as a
+      // Trigger where it arrives, before the conversation answers it, so it is deduplicated, admitted by the source's
+      // rules, and remembered as a Decision instead of evaporating into chat.
+      if (event.type === 'user/message' && session.id === this.host.masterId) this.hear(session.id, event.data)
       const agent = ctx.agents.get(session.id)
       const binding = agent && agent.session === session ? this.bindings.get(agent) : undefined
       if (!agent || !binding || binding.subagent) return
