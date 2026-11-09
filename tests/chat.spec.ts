@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import { chatThread, chatTrigger, type Conversation } from '../src/app/chat.ts'
 
 const chat: Conversation = { conversationKey: 'group:oc_1', senderId: 'ou_1', addressed: 'mention', title: '超代理' }
@@ -34,5 +34,11 @@ describe('a message written in a chat', () => {
     expect(direct).toMatchObject({ source: 'im', text: '帮我看看这个' })
     expect(direct && 'addressed' in direct).toBe(false)
     expect(direct?.actor).toEqual({ source: 'im', id: 'ou_1' })
+  })
+
+  it('records nothing for the harness bookkeeping that arrives as a user message', () => {
+    for (const text of ['Time sampled while preparing turn 5, step 1: 2026-11-09T08:19:36+08:00[Asia/Shanghai]', 'Current runtime context.', '<hindsight_knowledge>x</hindsight_knowledge>', '<dsh_im_reply_to>{"note":"q"}</dsh_im_reply_to>']) {
+      expect(chatTrigger(chat, text, at, 'session-1', 1)).toBeUndefined()
+    }
   })
 })

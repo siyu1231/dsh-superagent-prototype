@@ -1,13 +1,14 @@
-/** Lifecycle, prompt/tool/skill decoration, message delivery, and budget retry tracking for orchestrator and worker DSH sessions. */
+﻿/** Lifecycle, prompt/tool/skill decoration, message delivery, and budget retry tracking for orchestrator and worker DSH sessions. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
 import { scopeParentOf } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
 import { z } from 'zod'
 import { key, liveTicket, type Ticket, type Trigger } from '../core/index.ts'
-import { chatTrigger, type Conversation } from './chat.ts'
+import { chatTrigger, storedChats, type Conversation } from './chat.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { sameDirectory } from '../infra/environment.ts'
@@ -54,6 +55,18 @@ export interface SessionsHost {
 
 /** The part of dsh-im the plugin reads: which chat a Session is bound to, if any. Absent when the profile has no bridge. */
 interface ChatBridge { describeConversationSync?(sessionId: string): Conversation | undefined }
+
+/** What dsh-im reports when a chat starts talking to a Session. */
+interface ChatBinding {
+  botId?: string
+  sessionId: string
+  conversationKey: string
+  chatType?: string | null
+  chatId?: string | null
+  threadId?: string | null
+  senderId?: string | null
+  senderName?: string | null
+}
 
 /** The text of a message's content parts, which is what a person typed. */
 function spoken(content: unknown): string {
@@ -130,6 +143,8 @@ export class Sessions {
   private readonly agentDelivery: AgentDelivery
   /** Decorated agents mapped to their registered disposers and skill scope until the agent is disposed or `Sessions.dispose()` runs. */
   private readonly bindings = new Map<Agent, SessionBinding>()
+  /** The chat each Session was bound to by the IM bridge, which reports it when a chat starts talking to a Session. */
+  private readonly chats = new Map<string, Conversation>()
   private readonly retryHealth = new RetryHealth()
   private readonly ctx: Context
   /** Registers ordered `relay` and `notice` effect handlers that deliver to the main Session. */
@@ -140,19 +155,30 @@ export class Sessions {
     host.effects.handle('relay', ({ text }, requestId) => this.prompt(host.masterId, requestId, text, 'steer'), { ordered: true })
     host.effects.handle('notice', ({ value, summary }, name) => this.inject(name, value, summary), { ordered: true })
   }
+  /** The chat a Session is bound to, re-read from the bridge's records when a binding made since startup is missing. */
+  private chatOf(sessionId: string): Conversation | undefined {
+    const known = this.chats.get(sessionId)
+    if (known) return known
+    for (const [id, chat] of storedChats(process.env.DSH_HOME ?? join(homedir(), '.dsh'))) if (!this.chats.has(id)) this.chats.set(id, chat)
+    return this.chats.get(sessionId)
+  }
   /**
    * Records one message written in a chat bound to the router Session. The IM bridge knows which chat a Session is
    * talking to; when it cannot say (a Session opened in DSH's Web UI, a chat nobody bound), nothing is recorded and the
    * conversation carries on unrecorded, as every Session did before the bridge existed.
    */
-  private hear(session: SessionId, data: unknown): void {
+  private hear(session: { id: SessionId; header?: { cwd?: string } }, data: unknown): void {
     try {
-      const bridge = (this.host.context as unknown as { get?: (name: string) => ChatBridge | undefined }).get?.('dshIm')
-      const conversation = bridge?.describeConversationSync?.(session)
+      // The router's directory, not the pointer: the message that creates a Session arrives before that Session takes
+      // duty, and it is still a request somebody wrote.
+      const cwd = session.header?.cwd
+      if (!cwd || !sameDirectory(cwd, this.host.routerDirectory)) return
+      const bridge = (this.host.context as unknown as { reflect?: { get?: (name: string) => unknown } }).reflect?.get?.('dshIm') as ChatBridge | undefined
+      const conversation = this.chatOf(session.id) ?? bridge?.describeConversationSync?.(session.id)
       if (!conversation?.conversationKey) return
       const at = new Date().toISOString()
-      const trigger = chatTrigger(conversation, spoken((data as { content?: unknown } | undefined)?.content), at, session, Date.parse(at))
-      if (trigger) this.host.receive(trigger)
+      const trigger = chatTrigger(conversation, spoken((data as { content?: unknown } | undefined)?.content), at, session.id, Date.parse(at))
+      if (trigger) { console.log('[chat] recorded', trigger.id); this.host.receive(trigger) }
     } catch {
       // A chat message must still reach the router when recording it fails: the conversation is the person's answer.
     }
@@ -160,6 +186,22 @@ export class Sessions {
   /** Subscribes to host agent and session events so newly created sessions are decorated and model-budget retries are reflected in health. Call once at startup. */
   install(): void {
     const ctx = this.ctx
+    // dsh-im announces which chat it has bound to which Session, with the sender of the message that bound it. It
+    // declares that event inside its own package, so it is subscribed to by name rather than through the typed emitter.
+    const events = ctx as unknown as { root: { on(name: string, listener: (payload: ChatBinding) => void): void } }
+    // Bindings announced before this process started are only in the bridge's own records: a Session that was already
+    // talking to a chat keeps recording what people write there.
+    for (const [sessionId, chat] of storedChats(process.env.DSH_HOME ?? join(homedir(), '.dsh'))) this.chats.set(sessionId, chat)
+    events.root.on('dsh-im/session-pre-bind', payload => {
+      if (typeof payload?.sessionId !== 'string' || typeof payload.conversationKey !== 'string') return
+
+      this.chats.set(payload.sessionId, {
+        conversationKey: payload.conversationKey,
+        ...(payload.senderId ? { senderId: payload.senderId } : {}),
+        addressed: payload.chatType === 'p2p' ? 'direct' : 'mention',
+        ...(payload.senderName ? { title: payload.senderName } : {}),
+      })
+    })
     ctx.on('agent/disposed', ({ agent }) => {
       this.release(agent)
       this.retryHealth.clear(agent.id); this.updateModelHealth()
@@ -168,7 +210,7 @@ export class Sessions {
       // A message a person wrote in a chat the bridge bound to the router is a request like any other: record it as a
       // Trigger where it arrives, before the conversation answers it, so it is deduplicated, admitted by the source's
       // rules, and remembered as a Decision instead of evaporating into chat.
-      if (event.type === 'user/message' && session.id === this.host.masterId) this.hear(session.id, event.data)
+      if (event.type === 'user/message') this.hear(session, event.data)
       const agent = ctx.agents.get(session.id)
       const binding = agent && agent.session === session ? this.bindings.get(agent) : undefined
       if (!agent || !binding || binding.subagent) return
